@@ -1,0 +1,59 @@
+# 凭据 — 永远不能进 git
+.env
+.env.*
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# 数据 (大 + 跟系统状态相关) — 不进 git
+data/
+*.zip
+*.parquet
+*.dat
+*.day
+
+# 日志 + 缓存
+logs/
+*.log
+data_cache/
+*_cache/
+.cache/
+.streamlit/secrets.toml
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 各 q-* 命令的运行时产物
+*/logs/q-*_*.jsonl
+*/logs/q-*_*.md
+*/logs/unmatched_events.jsonl
+*/logs/batch_*.log
+*/data_cache/
+
+# 已知大文件 (会话日志)
+docs/0424.mem
+docs/0425.mem
+
+# 备份/临时
+*.bak
+*.legacy.bak
+*.tmp
+*~
+backup/
+
+.claude/
