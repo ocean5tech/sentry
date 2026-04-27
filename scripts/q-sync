@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# q-sync: 从通达信下载最新全量日线 zip，解压到 data/tdx/
+# 自动备份前一版数据，保留最近 2 天备份
+# 用法：
+#   q-sync             下载并解压（后台运行）
+#   q-sync --status    查看当前进度或上次结果
+#   q-sync --list      列出已有备份
+
+set -e
+
+QUANT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TDX_URL="https://data.tdx.com.cn/vipdoc/hsjday.zip"
+ZIP_FILE="$QUANT_DIR/data/hsjday.zip"
+TDX_DIR="$QUANT_DIR/data/tdx"
+BACKUP_BASE="$QUANT_DIR/data/tdx_backup"
+LOG="$QUANT_DIR/logs/tdx_sync.log"
+PID_FILE="$QUANT_DIR/logs/tdx_sync.pid"
+KEEP_BACKUPS=2
+
+mkdir -p "$QUANT_DIR/logs" "$QUANT_DIR/data"
+
+# ── 工具函数 ──────────────────────────────────────────────────
+count_day_files() {
+    ls "$TDX_DIR"/*/lday/*.day 2>/dev/null | wc -l
+}
+
+list_backups() {
+    ls -d "$BACKUP_BASE"_* 2>/dev/null | sort
+}
+
+# ── --list 显示备份 ───────────────────────────────────────────
+if [[ "$1" == "--list" ]]; then
+    echo "=== 已有备份 ==="
+    BACKUPS=$(list_backups)
+    if [[ -z "$BACKUPS" ]]; then
+        echo "无备份"
+    else
+        while IFS= read -r b; do
+            COUNT=$(ls "$b"/*/lday/*.day 2>/dev/null | wc -l)
+            DATE=$(basename "$b" | sed 's/tdx_backup_//')
+            echo "  $DATE — $COUNT 个 .day 文件  ($b)"
+        done <<< "$BACKUPS"
+    fi
+    if [[ -d "$TDX_DIR" ]]; then
+        COUNT=$(count_day_files)
+        echo "  当前 (tdx) — $COUNT 个 .day 文件"
+    fi
+    exit 0
+fi
+
+# ── --status 查看进度 ─────────────────────────────────────────
+if [[ "$1" == "--status" ]]; then
+    if [[ ! -f "$LOG" ]]; then
+        echo "尚未运行过 q-sync。"
+        exit 0
+    fi
+    echo "=== 最新进度 ==="
+    START_LINE=$(grep -n "开始下载\|备份完成\|解压完成\|完成：共" "$LOG" | tail -1 | cut -d: -f1)
+    if [[ -n "$START_LINE" ]]; then
+        # 往前5行以包含开始时间
+        FROM=$(( START_LINE > 5 ? START_LINE - 5 : 1 ))
+        tail -n +"$FROM" "$LOG" | tail -25
+    else
+        tail -25 "$LOG"
+    fi
+    echo ""
+    if [[ -d "$TDX_DIR" ]]; then
+        COUNT=$(count_day_files)
+        echo "当前数据：$COUNT 个 .day 文件"
+    fi
+    if [[ -f "$PID_FILE" ]]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "状态：运行中 (PID=$PID)"
+        else
+            echo "状态：已完成（或异常退出）"
+            rm -f "$PID_FILE"
+        fi
+    fi
+    exit 0
+fi
+
+# ── 检查是否已有进程在运行 ────────────────────────────────────
+if [[ -f "$PID_FILE" ]]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "⚠️  已有 q-sync 任务在运行中 (PID=$OLD_PID)"
+        echo "用 q-sync --status 查看进度"
+        echo ""
+        read -r -p "要终止旧任务并重新开始吗？[y/N] " answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            kill "$OLD_PID" 2>/dev/null && echo "已终止 PID=$OLD_PID"
+            rm -f "$PID_FILE"
+            sleep 1
+        else
+            echo "已取消。"
+            exit 0
+        fi
+    else
+        rm -f "$PID_FILE"
+    fi
+fi
+
+# ── 检查今天是否已经同步过 ────────────────────────────────────
+TODAY=$(date +%Y%m%d)
+if [[ -d "${BACKUP_BASE}_${TODAY}" ]] || grep -q "完成：共.*$(date +%Y-%m-%d)" "$LOG" 2>/dev/null; then
+    echo "⚠️  今天 ($TODAY) 已经同步过一次。"
+    read -r -p "要重新下载吗？[y/N] " answer
+    if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+        echo "已取消。用 q-sync --status 查看当前数据状态。"
+        exit 0
+    fi
+fi
+
+# ── 启动后台任务 ──────────────────────────────────────────────
+echo "启动 q-sync（后台运行）..."
+echo "日志：$LOG"
+echo "查看进度：q-sync --status"
+echo ""
+
+nohup bash -c '
+set -e
+ZIP_FILE="'"$ZIP_FILE"'"
+TDX_DIR="'"$TDX_DIR"'"
+TDX_URL="'"$TDX_URL"'"
+BACKUP_BASE="'"$BACKUP_BASE"'"
+KEEP_BACKUPS='"$KEEP_BACKUPS"'
+TODAY=$(date +%Y%m%d)
+
+log() { echo "$(date "+%Y-%m-%d %H:%M:%S") $*" | tee -a "'"$LOG"'"; }
+
+# ── 1. 备份现有数据 ──────────────────────────────────────────
+if [[ -d "$TDX_DIR" ]]; then
+    BACKUP_DIR="${BACKUP_BASE}_${TODAY}"
+    log "备份现有数据 → $(basename $BACKUP_DIR)"
+    mv "$TDX_DIR" "$BACKUP_DIR"
+    log "备份完成：$(ls "$BACKUP_DIR"/*/lday/*.day 2>/dev/null | wc -l) 个文件"
+
+    # 只保留最近 N 个备份，删除更早的
+    BACKUP_LIST=$(ls -d "${BACKUP_BASE}"_* 2>/dev/null | sort)
+    BACKUP_COUNT=$(echo "$BACKUP_LIST" | grep -c . 2>/dev/null || echo 0)
+    if (( BACKUP_COUNT > KEEP_BACKUPS )); then
+        TO_DELETE=$(echo "$BACKUP_LIST" | head -n $(( BACKUP_COUNT - KEEP_BACKUPS )))
+        while IFS= read -r old; do
+            log "删除旧备份：$(basename $old)"
+            rm -rf "$old"
+        done <<< "$TO_DELETE"
+    fi
+fi
+
+# ── 2. 下载 ──────────────────────────────────────────────────
+log "开始下载 $TDX_URL"
+wget -q --show-progress -O "$ZIP_FILE" "$TDX_URL" 2>&1 | tee -a "'"$LOG"'"
+SIZE=$(du -sh "$ZIP_FILE" | cut -f1)
+log "下载完成：$SIZE"
+
+# ── 3. 解压 ──────────────────────────────────────────────────
+log "开始解压"
+mkdir -p "$TDX_DIR"
+unzip -q "$ZIP_FILE" -d "$TDX_DIR"
+COUNT=$(ls "$TDX_DIR"/*/lday/*.day 2>/dev/null | wc -l)
+log "解压完成"
+log "完成：共 $COUNT 个 .day 文件，可运行 q-scan 进行选股"
+' >> "$LOG" 2>&1 &
+
+echo $! > "$PID_FILE"
+echo "已启动，PID=$!"

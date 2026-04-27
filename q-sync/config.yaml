@@ -1,0 +1,6 @@
+# q-sync 日线下载 config (路径 config 写死)
+
+name: "tdx"
+url: "https://data.tdx.com.cn/vipdoc/hsjday.zip"
+target_dir: "/home/wyatt/sentry/quant/data/tdx"
+backup_dir: "/home/wyatt/sentry/quant/data/backup/tdx"

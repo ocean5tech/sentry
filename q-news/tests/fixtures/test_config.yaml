@@ -1,0 +1,70 @@
+# 测试用 config: 用 fixture sector_map (有 stocks), 减少干扰
+data:
+  tdx_dir: "/home/wyatt/sentry/quant/data/tdx"
+  stock_names_csv: "/home/wyatt/sentry/quant/data/stock_names.csv"
+  q_seed_logs_dir: "/home/wyatt/sentry/quant/q-seed/logs"
+  q_fin_logs_dir: "/home/wyatt/sentry/quant/q-fin/logs"
+  cache_dir: "./data_cache"
+  cache_ttl_hours: 1
+
+knowledge_base_file: "./config/knowledge_base.yaml"
+sector_map_file: "./tests/fixtures/sector_map_minimal.yaml"
+
+sources:
+  akshare:
+    enabled: true
+    rate_limit_per_minute: 60
+    timeout_seconds: 15
+    interfaces: []                  # 测试不真拉
+    individual_news_func: "stock_news_em"
+  rss:
+    enabled: false                  # 测试关 RSS
+    feeds: []
+
+mode:
+  default: "free"
+  default_window_hours: 720          # 30 天 (fixtures 时间可能较旧)
+  triggers_min_match: 2
+
+concept_status:
+  active_pct_threshold: 0.5
+  qseed_topn_threshold: 30
+
+scoring:
+  weights:
+    rule_confidence: 0.4
+    concept_inactive_bonus: 0.3
+    direction_bullish_bonus: 0.1
+    qseed_inactive_bonus: 0.1
+    fundamentals_yoy_bonus: 0.1
+
+providers:
+  llm:
+    active: "anthropic"
+    anthropic:
+      api_key_env: "ANTHROPIC_API_KEY"
+      default_model: "claude-haiku-4-5-20251001"
+      verdict_model: "claude-sonnet-4-6"
+      pricing: {haiku: {input: 1.0, output: 5.0}, sonnet: {input: 3.0, output: 15.0}}
+    dummy: {pricing: {default: {input: 0, output: 0}}}
+    dummy_priced: {pricing: {default: {input: 1.0, output: 5.0}}}
+  search:
+    active: "duckduckgo"
+    duckduckgo: {retries: 1, retry_sleep_seconds: 1}
+    dummy: {}
+
+budget:
+  daily_usd_cap: 0.50
+  on_exceeded: "fallback_free"
+  cost_log: "./data_cache/cost_log.jsonl"
+
+output:
+  default_top: 10
+  jsonl_dir: "logs"
+  md_companion: false
+  retention_days: 30
+  unmatched_log: "./logs/unmatched_events.jsonl"
+
+fallback:
+  on_akshare_fail: "continue"
+  on_rss_fail: "continue_other_feeds"

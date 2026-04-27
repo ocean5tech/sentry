@@ -1,0 +1,55 @@
+# 测试用最小 sector_map: 含真实 stocks 验证管道
+稀有气体:
+  description: 半导体用氩气/氙气/氦气
+  priority: 2
+  synonyms: [氩气, 氦气, 氙气, 工业气体]
+  stocks:
+    - {code: "002409", name: "雅克科技", role: "龙头"}
+    - {code: "688268", name: "华特气体", role: "梯队"}
+
+稀土_磁材:
+  description: 稀土资源 / 钕铁硼 / 永磁
+  priority: 1
+  synonyms: [稀土, 钕铁硼, 钐钴, 永磁]
+  stocks:
+    - {code: "600111", name: "北方稀土", role: "龙头"}
+    - {code: "300748", name: "金力永磁", role: "梯队"}
+    - {code: "600392", name: "盛和资源", role: "梯队"}
+
+AI_算力:
+  description: AI 算力基础设施
+  priority: 1
+  synonyms: [AI, 算力, GPU]
+  stocks:
+    - {code: "300308", name: "中际旭创", role: "龙头"}
+    - {code: "300394", name: "天孚通信", role: "梯队"}
+
+光模块:
+  description: 800G/1.6T 光模块
+  priority: 1
+  synonyms: [CPO, 光模块, EML]
+  stocks:
+    - {code: "300308", name: "中际旭创", role: "龙头"}
+    - {code: "300394", name: "天孚通信", role: "梯队"}
+
+液冷IDC:
+  description: 液冷数据中心
+  priority: 2
+  synonyms: [液冷, 数据中心散热]
+  stocks:
+    - {code: "300473", name: "德尔股份", role: "卫星"}
+
+军工_国防:
+  description: 军工电子 / 国防
+  priority: 2
+  synonyms: [军工, 国防, 战机]
+  stocks:
+    - {code: "600760", name: "中航沈飞", role: "龙头"}
+
+黄金:
+  description: 黄金 (避险)
+  priority: 2
+  synonyms: [黄金, 金]
+  stocks:
+    - {code: "600547", name: "山东黄金", role: "龙头"}
+    - {code: "601899", name: "紫金矿业", role: "龙头"}

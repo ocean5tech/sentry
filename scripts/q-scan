@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# q-scan: A股选股扫描
+# 完整用法见: q-scan --help
+
+QUANT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$QUANT_DIR/.venv/bin/python" "$QUANT_DIR/scripts/run_scan.py" "$@"

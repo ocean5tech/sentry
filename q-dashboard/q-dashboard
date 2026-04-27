@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# q-dashboard: 启动 Streamlit web 端
+set -e
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+
+if [[ ! -f "$ROOT/.venv/bin/activate" ]]; then
+    echo "ERROR: q-dashboard/.venv 不存在. 先跑: cd $ROOT && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+exec "$ROOT/.venv/bin/streamlit" run "$ROOT/app.py" "$@"

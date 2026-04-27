@@ -1,0 +1,60 @@
+# TDX gpcw 财报字段索引映射
+# 文件结构: 每股票 584 个 float32 字段 (raw_array[idx])
+# verified=true: 用 茅台 600519 + 长龄 605389 + 平安银行 000001 三股 2025 年报数据交叉验证 (误差 < 5%)
+# verified=false: 索引位置未严格验证, 可能是营业利润/扣非/累计/TTM 等不同口径, 用前请校准
+
+fields:
+  # ===== 已验证 (交叉验证 茅台+长龄+平安, 误差 < 5%) =====
+  - name: eps
+    label: 基本每股收益 (元)
+    idx: 0
+    unit: yuan_per_share
+    verified: true
+
+  - name: revenue
+    label: 营业总收入 (元)
+    idx: 73
+    unit: yuan
+    verified: true
+
+  - name: net_profit
+    label: 归属母公司股东净利润 (元)
+    idx: 94
+    unit: yuan
+    verified: true
+
+  - name: total_assets
+    label: 总资产 (元)
+    idx: 39
+    unit: yuan
+    verified: true
+
+  # ===== 候选未验证 (需要更多股票交叉对照才能定论) =====
+  # [16] 长龄=1.86亿 接近营业利润 / 经常性净利润, 茅台对不上 → 暂不暴露
+  # [193]/[208] 茅台 EPS 准但其他股票不准 → 可能是预测/调整 EPS
+  # [97]/[100] 茅台营收准但其他股不准 → 可能是季度累计版本
+
+# 计算字段 (从已验证字段衍生)
+derived:
+  - name: net_margin
+    formula: "net_profit / revenue"
+    label: 净利率 (小数)
+    unit: ratio
+    safe: true
+
+  - name: market_cap_yi
+    formula: "total_assets / 100000000"
+    label: 总资产 (亿元) — 注意这是资产规模, 非市值
+    unit: yi_yuan
+    safe: true
+
+# 跨期同比字段
+yoy:
+  - name: yoy_net_profit
+    base_field: net_profit
+    label: 归属净利润同比增长 (%)
+    requires_lookback_periods: 4
+  - name: yoy_revenue
+    base_field: revenue
+    label: 营业总收入同比增长 (%)
+    requires_lookback_periods: 4

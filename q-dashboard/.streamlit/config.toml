@@ -1,0 +1,20 @@
+# 华尔街金融页面风格 (dark + 金/青强调)
+
+[theme]
+base = "dark"
+primaryColor = "#FFD700"               # 金 (主色, 高亮数字/链接)
+backgroundColor = "#0E1117"            # 深炭黑背景
+secondaryBackgroundColor = "#1E2329"   # 卡片/侧栏背景
+textColor = "#E8E9EB"
+font = "monospace"
+
+[server]
+port = 8501
+address = "0.0.0.0"                     # 绑所有接口, Windows 浏览器可访问 WSL2
+headless = true                         # 不自动开浏览器
+runOnSave = false
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# 疯牛种子 - 利通型 (W 型双底 + loose HH/Pierce)
+# 用法:
+#   q-seed-litong              # 默认 TOP 20 基本面
+#   q-seed-litong 50           # TOP 50
+#   q-seed-litong --skip-scan  # 跳过扫描
+set -e
+cd "$(dirname "$0")/.."
+source .venv/bin/activate
+
+TOP=20
+SKIP=0
+for arg in "$@"; do
+    case "$arg" in
+        --skip-scan) SKIP=1 ;;
+        [0-9]*) TOP="$arg" ;;
+    esac
+done
+
+if [[ $SKIP -eq 0 ]]; then
+    echo "===== 疯牛种子-利通 Step 1/2: 全市场扫描 (~15 分钟, loose 模式触发更多) ====="
+    python3 -u scripts/find_similar_to_template.py --template litong
+    echo ""
+fi
+
+echo "===== 疯牛种子-利通 Step 2/2: TOP $TOP 基本面 ====="
+python3 -u scripts/fetch_candidate_fundamentals.py --from-csv logs/similar_to_litong.csv --top "$TOP"
+
+echo ""
+echo "===== 完成 ====="
+echo "  形态: logs/similar_to_litong.csv"
+echo "  基本面: logs/fundamentals_litong.csv"

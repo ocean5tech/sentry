@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# q-news: 事件驱动新闻 → A 股推理 (默认 free 规则引擎; --paid 启用 LLM 兜底)
+# L2 独立: 自带 .venv, 不依赖父项目环境
+set -e
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+
+if [[ ! -f "$ROOT/.venv/bin/activate" ]]; then
+    echo "ERROR: q-news/.venv 不存在. 先跑: cd $ROOT && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+exec "$ROOT/.venv/bin/python" -u "$ROOT/main.py" "$@"

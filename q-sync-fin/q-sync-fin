@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# q-sync-fin: 下载 TDX 财报 zip, 解压到 data/tdx_fin/
+# 支持 --from-zip <path> 跳过下载 (内网 proxy 拦时用)
+set -e
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+exec python3 -u -c "
+import sys, argparse
+sys.path.insert(0, '/home/wyatt/sentry/quant/q-sync')
+import yaml
+from pathlib import Path
+from _download import run_download
+
+ap = argparse.ArgumentParser(prog='q-sync-fin')
+ap.add_argument('--from-zip', default=None, help='跳过下载, 用本地 zip')
+args = ap.parse_args()
+
+cfg = yaml.safe_load(Path('$ROOT/config.yaml').read_text(encoding='utf-8'))
+sys.exit(run_download(
+    name=cfg['name'],
+    url=cfg['url'],
+    target_dir=cfg['target_dir'],
+    backup_dir=cfg['backup_dir'],
+    from_zip=args.from_zip,
+))
+" "$@"

@@ -1,0 +1,12 @@
+# q-dashboard 配置
+
+paths:
+  q_seed_logs: "/home/wyatt/sentry/quant/q-seed/logs"
+  q_fin_logs: "/home/wyatt/sentry/quant/q-fin/logs"
+  q_news_logs: "/home/wyatt/sentry/quant/q-news/logs"
+  q_fin_cost_log: "/home/wyatt/sentry/quant/q-fin/data_cache/cost_log.jsonl"
+  q_news_cost_log: "/home/wyatt/sentry/quant/q-news/data_cache/cost_log.jsonl"
+  batch_logs: "/home/wyatt/sentry/quant/logs"
+
+# 交易日历 (用 akshare 自动拉; 缓存到本文件)
+trade_calendar_cache: "/home/wyatt/sentry/quant/q-dashboard/.cache/trade_calendar.csv"

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# q-clean: 按 retention 删旧文件
+set -e
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+exec python3 -u "$ROOT/main.py" "$@"

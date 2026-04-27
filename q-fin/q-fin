@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# q-fin: 事件驱动题材股检索 (借壳/控制权变更/主业转型)
+# L2 独立: 自带 .venv, 不依赖父项目环境
+set -e
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+
+if [[ ! -f "$ROOT/.venv/bin/activate" ]]; then
+    echo "ERROR: q-fin/.venv 不存在. 先跑: cd $ROOT && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+source "$ROOT/.venv/bin/activate"
+exec python3 -u "$ROOT/main.py" "$@"

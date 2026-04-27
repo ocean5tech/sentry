@@ -1,0 +1,253 @@
+# q-news 推理规则库 (free 模式核心知识)
+# 格式:
+#   <rule_id>:
+#     triggers: 关键词列表 (任意一个命中即激活)
+#     必须含至少 2 个 trigger 避免误命中
+#     reasoning_chain: news → impact → analysis → concept 推理路径
+#       layer: 2=直接影响, 3=衍生分析, 4=概念定位
+#     target_sectors: 该规则指向的概念名 (必须在 sector_map.yaml 里有定义)
+#     confidence_base: 0-1 基础置信度
+#     priority: 1-3 (1=高频高价值, 3=低频边缘)
+#     direction: bullish (利好) | bearish (利空) | neutral
+#
+# 命中机制: 新闻标题 + 内容做关键词匹配, ≥2 个 trigger 命中视为激活
+# 多规则同时命中 → 多 reasoning_chain 输出, 取 confidence 最高排序
+
+rules:
+
+  # ==================== 油价 / 大宗能源 ====================
+
+  opec_减产:
+    triggers: ["OPEC", "减产", "限产", "原油"]
+    direction: bullish
+    target_sectors: [稀有气体]              # 炼化副产, 你雅克例子
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "原油价格上升 → 炼化产能利用率下降", weight: 0.92}
+      - {layer: 3, type: analysis, content: "炼化副产稀有气体减少 → 供给紧张", weight: 0.78}
+      - {layer: 4, type: concept,  content: "稀有气体板块"}
+    confidence_base: 0.72
+    priority: 1
+    examples: ["2026-04 OPEC+ 减产 200 万桶/日"]
+
+  opec_增产:
+    triggers: ["OPEC", "增产", "放开产能", "原油"]
+    direction: bearish
+    target_sectors: [石油石化]              # 注: sector_map 暂未定义, 用户填
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "油价承压", weight: 0.92}
+      - {layer: 3, type: analysis, content: "上游石油公司利润收缩, 下游炼化成本下降", weight: 0.80}
+      - {layer: 4, type: concept,  content: "石油石化"}
+    confidence_base: 0.68
+    priority: 2
+
+  油价_地缘冲突:
+    triggers: ["中东", "霍尔木兹", "袭击", "石油设施", "封锁"]
+    direction: bullish
+    target_sectors: [稀有气体, 黄金]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "短期油价跳涨 + 避险情绪", weight: 0.85}
+      - {layer: 3, type: analysis, content: "稀有气体供给收紧 + 黄金避险买盘", weight: 0.70}
+      - {layer: 4, type: concept,  content: "稀有气体, 黄金"}
+    confidence_base: 0.65
+    priority: 1
+
+  # ==================== 美国 / 美联储 / 汇率 ====================
+
+  美联储_降息:
+    triggers: ["美联储", "降息", "鸽派", "FOMC"]
+    direction: bullish
+    target_sectors: [黄金, 创新药, AI_算力]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "美元走弱 → 大宗反弹 + 成长股估值修复", weight: 0.85}
+      - {layer: 3, type: analysis, content: "黄金/白银上涨, 美元资产回流新兴市场, 长久期资产受益", weight: 0.75}
+      - {layer: 4, type: concept,  content: "黄金, 创新药, AI 算力"}
+    confidence_base: 0.70
+    priority: 1
+
+  美元_走强:
+    triggers: ["美元", "强势", "DXY", "美元指数"]
+    direction: bearish
+    target_sectors: [黄金, 锂矿, 铜矿]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "美元走强 → 大宗以美元计价承压", weight: 0.78}
+      - {layer: 4, type: concept,  content: "黄金, 有色金属"}
+    confidence_base: 0.62
+    priority: 2
+
+  # ==================== 中国政策 / 央行 ====================
+
+  央行_降准降息:
+    triggers: ["央行", "降准", "降息", "MLF", "LPR下调"]
+    direction: bullish
+    target_sectors: [新能源_锂电, AI_算力, 创新药]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "流动性宽松 + 利率下行", weight: 0.88}
+      - {layer: 3, type: analysis, content: "成长股久期溢价 + 银行存款搬家", weight: 0.75}
+      - {layer: 4, type: concept,  content: "高弹性成长板块"}
+    confidence_base: 0.72
+    priority: 1
+
+  财政刺激:
+    triggers: ["特别国债", "万亿", "刺激", "稳增长", "消费券"]
+    direction: bullish
+    target_sectors: [军工_国防, 商业航天]    # 财政方向往往是战略性产业
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "公共投资扩张", weight: 0.80}
+      - {layer: 3, type: analysis, content: "战略产业受益 (大基建/军工/航天)", weight: 0.70}
+    confidence_base: 0.65
+    priority: 2
+
+  科创扶持:
+    triggers: ["科技自立", "卡脖子", "国产替代", "突破"]
+    direction: bullish
+    target_sectors: [半导体_国产替代, 模拟芯片, 商业航天]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "政策风向继续指向国产替代", weight: 0.85}
+      - {layer: 4, type: concept,  content: "半导体国产替代相关"}
+    confidence_base: 0.70
+    priority: 1
+
+  # ==================== 出口管制 / 贸易战 ====================
+
+  美对华出口管制:
+    triggers: ["实体清单", "出口管制", "BIS", "禁运"]
+    direction: bullish                     # 国产替代受益
+    target_sectors: [半导体_国产替代, 稀土_磁材, EDA]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "美方限制 → 国产替代加速", weight: 0.88}
+      - {layer: 3, type: analysis, content: "国内厂商订单转移 + 估值修复", weight: 0.75}
+      - {layer: 4, type: concept,  content: "半导体国产替代 / EDA / 设备"}
+    confidence_base: 0.75
+    priority: 1
+
+  中国出口管制_稀土:
+    triggers: ["稀土", "出口管制", "镓", "锗", "石墨"]
+    direction: bullish
+    target_sectors: [稀土_磁材]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "稀土/小金属海外定价上涨", weight: 0.90}
+      - {layer: 3, type: analysis, content: "国内稀土资源股定价权增强", weight: 0.80}
+      - {layer: 4, type: concept,  content: "稀土"}
+    confidence_base: 0.78
+    priority: 1
+
+  # ==================== 地缘 ====================
+
+  台海局势:
+    triggers: ["台海", "演习", "解放军", "环台"]
+    direction: bullish
+    target_sectors: [军工_国防]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "国防订单预期 + 避险板块轮动", weight: 0.75}
+      - {layer: 4, type: concept,  content: "军工"}
+    confidence_base: 0.62
+    priority: 2
+
+  俄乌_中东冲突:
+    triggers: ["俄乌", "以色列", "伊朗", "胡塞", "巴勒斯坦"]
+    direction: bullish
+    target_sectors: [军工_国防, 黄金, 稀有气体]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "避险 + 油价跳涨 + 军贸需求", weight: 0.78}
+      - {layer: 4, type: concept,  content: "军工, 黄金, 稀有气体"}
+    confidence_base: 0.65
+    priority: 2
+
+  # ==================== AI / 算力 ====================
+
+  AI_订单_扩产:
+    triggers: ["NVIDIA", "英伟达", "数据中心", "AI 芯片", "GB200", "B200", "Blackwell"]
+    direction: bullish
+    target_sectors: [AI_算力, 光模块, 液冷IDC]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "AI 算力需求扩张, 上游产业链订单饱满", weight: 0.88}
+      - {layer: 3, type: analysis, content: "光模块/液冷/服务器/PCB 直接受益", weight: 0.82}
+      - {layer: 4, type: concept,  content: "AI 算力 / 光模块 / 液冷"}
+    confidence_base: 0.75
+    priority: 1
+
+  大模型_新发布:
+    triggers: ["GPT", "Claude", "Gemini", "DeepSeek", "Qwen", "新模型", "发布"]
+    direction: bullish
+    target_sectors: [AI_算力, 数据要素]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "大模型迭代刺激算力 + 应用层", weight: 0.78}
+      - {layer: 4, type: concept,  content: "AI 算力, 数据要素"}
+    confidence_base: 0.65
+    priority: 2
+
+  # ==================== 商业航天 ====================
+
+  火箭_卫星发射:
+    triggers: ["火箭", "卫星", "发射", "组网", "千帆", "GW"]
+    direction: bullish
+    target_sectors: [商业航天, 卫星导航]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "商业航天加速组网 + 政策支持", weight: 0.85}
+      - {layer: 4, type: concept,  content: "商业航天 / 卫星互联网"}
+    confidence_base: 0.72
+    priority: 1
+
+  # ==================== 创新药 ====================
+
+  FDA_批准:
+    triggers: ["FDA 批准", "FDA approval", "ANDA", "BLA"]
+    direction: bullish
+    target_sectors: [创新药, ADC, CXO]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "中国药企海外里程碑兑现", weight: 0.88}
+      - {layer: 4, type: concept,  content: "创新药 / ADC"}
+    confidence_base: 0.78
+    priority: 1
+
+  授权出海_BD:
+    triggers: ["授权", "license", "BD", "海外授权", "首付款"]
+    direction: bullish
+    target_sectors: [创新药, ADC]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "创新药 BD 出海, 现金流改善", weight: 0.85}
+      - {layer: 4, type: concept,  content: "创新药"}
+    confidence_base: 0.72
+    priority: 1
+
+  # ==================== 人形机器人 ====================
+
+  人形机器人_新品:
+    triggers: ["人形机器人", "Optimus", "特斯拉机器人", "宇树", "智元"]
+    direction: bullish
+    target_sectors: [人形机器人]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "新品发布刺激产业链订单预期", weight: 0.80}
+      - {layer: 3, type: analysis, content: "减速器/丝杠/灵巧手/电机受益", weight: 0.75}
+      - {layer: 4, type: concept,  content: "人形机器人"}
+    confidence_base: 0.70
+    priority: 1
+
+  # ==================== 新能源 ====================
+
+  固态电池_突破:
+    triggers: ["固态电池", "全固态", "突破"]
+    direction: bullish
+    target_sectors: [新能源_锂电]
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "固态电池产业化预期上调", weight: 0.78}
+      - {layer: 4, type: concept,  content: "锂电"}
+    confidence_base: 0.68
+    priority: 2
+
+  # ==================== 元规则 ====================
+
+  控制权变更_借壳:
+    triggers: ["控制权变更", "实际控制人", "要约收购", "借壳"]
+    direction: bullish
+    target_sectors: []                     # 个股层面, q-fin 已专门处理
+    reasoning_chain:
+      - {layer: 2, type: impact,   content: "公司质变 → q-fin Layer 1 命中", weight: 0.95}
+    confidence_base: 0.85
+    priority: 1
+    fallthrough: true                       # 命中后建议 q-news --pipe-to q-fin
+
+
+# ==================== 兜底 / unmatched ====================
+# 未命中规则的新闻 → q-news 默认 drop (free 模式)
+# --paid 时升 LLM 兜底, 把 unmatched 写到 logs/unmatched_events.jsonl 供后续人工补规则

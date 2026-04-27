@@ -1,0 +1,18 @@
+# q-push 企业微信群机器人推送 config
+
+wechat:
+  webhook_url_env: "WECHAT_WEBHOOK_URL"     # 从 ~/sentry/quant/.env 读
+  msg_type: "markdown"                       # markdown / text
+  retry_times: 2
+  timeout_seconds: 10
+
+dashboard:
+  base_url: "http://localhost:8501"
+  date_query: "?date={scan_date}"            # query string 模板
+
+# 显示限制
+output:
+  max_records_per_msg: 5                     # 单次推送最多 5 条 (避免超长)
+  emoji_rank: ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+  truncate_one_liner: 30                     # one_liner 字符截断
+  include_link: true                         # 是否带 dashboard 链接

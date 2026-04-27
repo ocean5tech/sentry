@@ -1,0 +1,126 @@
+# q-news/config.yaml
+# 事件驱动新闻 → A股推理. 默认 free 规则引擎; --paid 启用 LLM 兜底.
+
+data:
+  tdx_dir: "/home/wyatt/sentry/quant/data/tdx"
+  stock_names_csv: "/home/wyatt/sentry/quant/data/stock_names.csv"
+  q_seed_logs_dir: "/home/wyatt/sentry/quant/q-seed/logs"
+  q_fin_logs_dir: "/home/wyatt/sentry/quant/q-fin/logs"
+  cache_dir: "./data_cache"
+  cache_ttl_hours: 1                  # 新闻刷新快, 1h cache 比 24h 合适
+
+# 知识库
+knowledge_base_file: "./config/knowledge_base.yaml"
+sector_map_file: "./config/sector_map.yaml"
+
+# 数据源 (V0 实测可用清单)
+sources:
+  akshare:
+    enabled: true
+    rate_limit_per_minute: 60
+    timeout_seconds: 15
+    interfaces:                       # 全市场快讯类
+      - {name: "akshare:cls",   func: "stock_info_global_cls",  weight: 1.0}
+      - {name: "akshare:em",    func: "stock_info_global_em",   weight: 1.0}
+      - {name: "akshare:cjzc",  func: "stock_info_cjzc_em",     weight: 0.8}
+      - {name: "akshare:cctv",  func: "news_cctv",              weight: 0.7, args: {date: "today"}}
+    individual_news_func: "stock_news_em"   # 反向查个股新闻 (--input 时用)
+
+  rss:
+    enabled: true
+    timeout_seconds: 10
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+    feeds:
+      - {name: "rss:新华网-时政", url: "http://www.news.cn/politics/news_politics.xml", tags: [政策, 政治], weight: 0.9}
+      - {name: "rss:新华网-经济", url: "http://www.news.cn/fortune/news_fortune.xml",   tags: [财经, 经济], weight: 1.0}
+      - {name: "rss:新华网-科技", url: "http://www.news.cn/tech/news_tech.xml",         tags: [科技, 创新], weight: 0.9}
+      - {name: "rss:新华网-国际", url: "http://www.news.cn/world/news_world.xml",       tags: [国际, 地缘], weight: 0.7}
+      - {name: "rss:新华网-军事", url: "http://www.news.cn/mil/news_mil.xml",           tags: [军工, 国防], weight: 0.7}
+
+# 模式
+mode:
+  default: "free"
+  default_window_hours: 24            # 默认拉最近 24h 新闻
+  triggers_min_match: 2               # 触发词命中数下限
+  emit_event_only_when_no_stocks: true   # sector_map 暂未填 stocks 时, 仍输出 event-level (code=null)
+
+# 概念启动判定 (核心 alpha)
+concept_status:
+  active_pct_threshold: 0.5           # ≥50% 概念股在 q-seed top → 已启动
+  qseed_topn_threshold: 30            # 取 q-seed TOP N 作"已启动"参考
+  emit_when_no_qseed_data: true       # q-seed logs 不存在时 verdict=null 不报错
+
+# 评分
+scoring:
+  weights:
+    rule_confidence: 0.4              # 规则置信度
+    concept_inactive_bonus: 0.3       # 概念未启动加分 (核心 alpha!)
+    direction_bullish_bonus: 0.1
+    qseed_inactive_bonus: 0.1         # 个股 q-seed 未命中加分
+    fundamentals_yoy_bonus: 0.1       # 反查 fundamentals 同比
+
+# Provider 抽象层 (复用 q-fin 同结构)
+providers:
+  llm:
+    active: "anthropic"
+    anthropic:
+      api_key_env: "ANTHROPIC_API_KEY"
+      default_model: "claude-haiku-4-5-20251001"
+      verdict_model: "claude-sonnet-4-6"
+      verdict_model_top_n: 5
+      pricing:
+        haiku:  {input: 1.0, output: 5.0}
+        sonnet: {input: 3.0, output: 15.0}
+    openai_compat:
+      api_key_env: "OPENAI_API_KEY"
+      base_url: "https://api.openai.com/v1"
+      default_model: "gpt-4o-mini"
+      verdict_model: "gpt-4o"
+      pricing:
+        default: {input: 0.15, output: 0.60}
+        verdict: {input: 2.50, output: 10.00}
+    dummy:
+      pricing: {default: {input: 0, output: 0}}
+    dummy_priced:
+      pricing: {default: {input: 1.0, output: 5.0}}
+  search:
+    active: "duckduckgo"
+    duckduckgo:
+      retries: 2
+      retry_sleep_seconds: 3
+    anthropic_tool:
+      requires_llm: "anthropic"
+      cost_per_call_usd: 0.01
+    dummy: {}
+
+# 实体调查 (与 q-fin 一致)
+entity_research:
+  max_depth_standard: 1               # q-news 推理已经多层, entity 只查 1 层就够
+  max_depth_deep: 2
+  fanout_per_layer: 2
+  budget_per_stock_usd: 0.05
+  prefer_entity_hints: true
+  web_search_max_uses: 1
+
+# 预算保护
+budget:
+  daily_usd_cap: 0.50
+  on_exceeded: "fallback_free"
+  cost_log: "./data_cache/cost_log.jsonl"
+
+# 输出
+output:
+  default_top: 30
+  jsonl_dir: "logs"
+  md_companion: true
+  retention_days: 30
+  unmatched_log: "./logs/unmatched_events.jsonl"
+  balance_per_concept: true           # 防止单一概念 (例: AI 算力) 占满 TOP
+  min_per_concept: 0                  # V0 不强制每概念至少 N 条
+
+# 降级
+fallback:
+  on_akshare_fail: "continue"
+  on_rss_fail: "continue_other_feeds"
+  on_llm_fail: "fallback_free"
+  on_search_fail: "skip_entity"

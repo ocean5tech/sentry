@@ -1,0 +1,49 @@
+# 测试 C19: 故意指向不存在的 tdx_dir 触发 fail-fast
+data:
+  tdx_dir: "/nonexistent/tdx"
+  parquet_fallback_dir: "/nonexistent/daily"
+  stock_names_csv: "/nonexistent/stock_names.csv"
+
+templates:
+  hongjing:
+    code: "301396"
+    name: "宏景科技"
+    sig_dates: ["2024-09-30"]
+    mode: "strict"
+
+wave_params:
+  launch_ret: 0.05
+  launch_vol_mul: 2.0
+  vol_win: 20
+  pullback_win: 15
+  lookback: 60
+  min_wave: 2
+  max_waves_feat: 4
+  spike_win: 5
+  spike_skip: 5
+  min_triangle_len: 9
+  price_center: 80
+  recent_days: 60
+
+filter:
+  skip_st: true
+  min_listing_days: 130
+  exclude_suspended: true
+  board_whitelist: ["00", "60", "30", "68"]
+
+kline_safety:
+  vwap_window: 60
+  thresholds:
+    red: 1.30
+    yellow: 1.10
+    green: 0.90
+
+output:
+  default_top: 30
+  jsonl_dir: "logs"
+  md_companion: true
+  retention_days: 30
+
+fallback:
+  on_missing_data: "skip"
+  on_template_corrupt: "error"

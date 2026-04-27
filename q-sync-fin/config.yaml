@@ -1,0 +1,6 @@
+# q-sync-fin 财报下载 config
+
+name: "tdx_fin"
+url: "https://data.tdx.com.cn/vipdoc/tdxfin.zip"
+target_dir: "/home/wyatt/sentry/quant/data/tdx_fin"
+backup_dir: "/home/wyatt/sentry/quant/data/backup/tdx_fin"

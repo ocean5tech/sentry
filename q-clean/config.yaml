@@ -1,0 +1,34 @@
+# q-clean 硬盘清理 config
+# 默认 dry-run, 加 --apply 才真删
+
+targets:
+  # 备份 zip — 前一次下载备份, q-sync 已用完即可删
+  - {path: "/home/wyatt/sentry/quant/data/backup", pattern: "**/*", retention_days: 3}
+
+  # parquet fallback (baostock) — 半年以上的删
+  - {path: "/home/wyatt/sentry/quant/data/daily", pattern: "*.parquet", retention_days: 180}
+
+  # q-* logs — 30 天滚动
+  - {path: "/home/wyatt/sentry/quant/q-seed/logs", pattern: "q-seed_*.jsonl", retention_days: 30}
+  - {path: "/home/wyatt/sentry/quant/q-seed/logs", pattern: "q-seed_*.md",     retention_days: 30}
+  - {path: "/home/wyatt/sentry/quant/q-fin/logs",  pattern: "q-fin_*.jsonl",   retention_days: 30}
+  - {path: "/home/wyatt/sentry/quant/q-fin/logs",  pattern: "q-fin_*.md",      retention_days: 30}
+  - {path: "/home/wyatt/sentry/quant/q-news/logs", pattern: "q-news_*.jsonl",  retention_days: 30}
+  - {path: "/home/wyatt/sentry/quant/q-news/logs", pattern: "q-news_*.md",     retention_days: 30}
+
+  # q-fin 数据缓存 — 7 天 (akshare 公告/股东慢, 缓存 7d 减少重拉)
+  - {path: "/home/wyatt/sentry/quant/q-fin/data_cache",  pattern: "*.json", retention_days: 7}
+
+  # q-news 数据缓存 — 1 天 (新闻刷新快)
+  - {path: "/home/wyatt/sentry/quant/q-news/data_cache", pattern: "*.json", retention_days: 1}
+
+  # unmatched_events 日志 — 14 天 (用户应该定期 review 补规则)
+  - {path: "/home/wyatt/sentry/quant/q-news/logs", pattern: "unmatched_events.jsonl", retention_days: 14}
+
+# 安全配置
+min_disk_free_gb: 5             # 磁盘 free < 5GB 时强制清 (打印警告)
+never_delete:                    # glob 永远不删 (即使过期)
+  - "**/.env"
+  - "**/config.yaml"
+  - "**/config/*.yaml"
+  - "**/cost_log.jsonl"          # 成本审计日志永远保留

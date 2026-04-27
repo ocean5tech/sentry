@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# 每日增量更新：补全所有股票最新几天的数据
+# 在盘后 15:30+ 运行，约 10-20 分钟
+
+set -e
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+QUANT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+COUNT=$(ls "$QUANT_DIR/data/daily/"*.parquet 2>/dev/null | wc -l)
+if [[ "$COUNT" -eq 0 ]]; then
+    echo "错误：data/daily/ 为空，请先运行 q-pull.sh 拉取历史数据。"
+    exit 1
+fi
+
+echo "开始增量更新（当前已有 $COUNT 只股票）..."
+"$QUANT_DIR/.venv/bin/python" -c "
+import sys; sys.path.insert(0, '$QUANT_DIR')
+from core.data_loader import update_all_daily
+update_all_daily()
+"

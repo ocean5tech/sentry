@@ -1,0 +1,70 @@
+# q-seed/config.yaml
+# 形态相似度选股 (疯牛种子 hongjing + litong)
+# 永远 free, 不调 LLM, 不联网
+
+# 数据源
+data:
+  tdx_dir: "/home/wyatt/sentry/quant/data/tdx"
+  parquet_fallback_dir: "/home/wyatt/sentry/quant/data/daily"
+  stock_names_csv: "/home/wyatt/sentry/quant/data/stock_names.csv"
+
+# 模板定义 (硬编码, 标杆股)
+templates:
+  hongjing:
+    code: "301396"
+    name: "宏景科技"
+    sig_dates: ["2024-09-30", "2025-12-09", "2026-01-12"]
+    mode: "strict"
+  litong:
+    code: "603629"
+    name: "利通电子"
+    sig_dates: ["2025-12-10", "2026-01-14", "2026-01-27", "2026-02-02"]
+    mode: "loose"
+
+# 形态参数
+wave_params:
+  launch_ret: 0.05
+  launch_vol_mul: 2.0
+  vol_win: 20
+  pullback_win: 15
+  lookback: 60
+  min_wave: 2
+  max_waves_feat: 4
+  spike_win: 5
+  spike_skip: 5
+  min_triangle_len: 9
+  price_center: 80
+  recent_days: 60
+
+# 过滤
+filter:
+  skip_st: true
+  min_listing_days: 130
+  exclude_suspended: true
+  board_whitelist: ["00", "60", "30", "68"]
+
+# K 线安全性 4 档阈值
+kline_safety:
+  vwap_window: 60
+  thresholds:
+    red: 1.30      # >= VWAP60 × 1.30 → 🔴 追高
+    yellow: 1.10   # 1.10~1.30 → 🟡 临界
+    green: 0.90    # 0.90~1.10 → 🟢 健康
+    # < 0.90 → ⚪ 被遗忘
+
+# 输出
+output:
+  default_top: 30
+  jsonl_dir: "logs"
+  md_companion: true
+  retention_days: 30
+  # 模板均衡策略 (--template both 时生效)
+  # balance_per_template: true → top 名额对半分, hongjing TOP/2 + litong TOP/2
+  # min_per_template: 某一边至少有 N 个 (有候选时), 防止全被另一边淹没
+  balance_per_template: true
+  min_per_template: 10
+
+# 降级/边界
+fallback:
+  on_missing_data: "skip"
+  on_template_corrupt: "error"

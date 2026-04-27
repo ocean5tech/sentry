@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# q-push: stdin JSON Lines → 企业微信群机器人 webhook
+set -e
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+exec python3 -u "$ROOT/main.py" "$@"

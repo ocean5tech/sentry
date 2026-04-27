@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# q-seed: 形态相似度选股 (疯牛种子 hongjing + litong)
+# L2 独立: 自带 .venv, 不依赖父项目环境
+set -e
+
+# 解析自己的安装路径 (即使被符号链接到 PATH 也能找到)
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+
+# 启用本目录独立 venv
+if [[ ! -f "$ROOT/.venv/bin/activate" ]]; then
+    echo "ERROR: q-seed/.venv 不存在. 先跑: cd $ROOT && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+# shellcheck disable=SC1091
+source "$ROOT/.venv/bin/activate"
+
+# Python -u 关闭 stdout 缓冲 (适配管道场景)
+exec python3 -u "$ROOT/main.py" "$@"

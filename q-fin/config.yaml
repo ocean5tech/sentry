@@ -1,0 +1,113 @@
+# q-fin/config.yaml
+# 事件驱动题材股检索器
+# 默认 free 永远不调 LLM, --paid / --paid=deep 显式启用
+
+data:
+  tdx_dir: "/home/wyatt/sentry/quant/data/tdx"
+  tdx_fin_dir: "/home/wyatt/sentry/quant/data/tdx_fin"
+  stock_names_csv: "/home/wyatt/sentry/quant/data/stock_names.csv"
+  q_seed_logs_dir: "/home/wyatt/sentry/quant/q-seed/logs"
+  cache_dir: "./data_cache"
+  cache_ttl_hours: 24
+  entity_cache_ttl_days: 90
+
+# 关键词 / 字段映射 / 实体 hints 都外置
+keywords_file: "./config/keywords.yaml"
+field_map_file: "./config/gpcw_field_map.yaml"
+entity_hints_file: "./config/entity_hints.yaml"
+
+# 数据源
+sources:
+  tdx_fin:
+    enabled: true
+    load_recent_periods: 8       # 加载最近 8 期 (2 年, 够算 YoY)
+    use_unverified_fields: false # 仅 verified=true 的字段对外
+  akshare:
+    enabled: true
+    rate_limit_per_minute: 60
+    timeout_seconds: 15
+    retry_times: 2
+    interfaces:
+      announcements: "stock_zh_a_disclosure_report_cninfo"
+      shareholders_top10: "stock_gdfx_free_top_10_em"
+      holder_count_history: "stock_zh_a_gdhs_detail_em"
+      stock_news: "stock_news_em"
+      board_concept: "stock_board_concept_cons_em"
+  baostock:
+    enabled: true                # 仅作 tdx_fin 兜底
+    timeout_seconds: 30
+    retry_times: 1
+
+# 模式 (--paid 触发, 默认 free)
+mode:
+  default: "free"
+  layer1_candidate_limit: 100
+  layer2_top_output: 15
+
+# 递归实体调查 (--paid 启用)
+entity_research:
+  max_depth_standard: 2
+  max_depth_deep: 3
+  fanout_per_layer: 2
+  budget_per_stock_usd: 0.10
+  prefer_entity_hints: true
+  min_shareholder_pct_for_research: 0.03
+  # Anthropic web_search tool 每次 LLM 调用最多搜几次 (1=经济, 2=完整, 3+=贪婪)
+  # max_uses=1 单只成本 ~$0.05; max_uses=2 ~$0.10. 调高时记得相应放宽 budget_per_stock_usd
+  web_search_max_uses: 1
+
+# Provider 抽象层 (B2 才实施, B1 占位)
+providers:
+  llm:
+    active: "anthropic"
+    anthropic:
+      api_key_env: "ANTHROPIC_API_KEY"
+      default_model: "claude-haiku-4-5-20251001"
+      verdict_model: "claude-sonnet-4-6"
+      verdict_model_top_n: 5
+      prompt_cache: true
+      pricing:
+        haiku:  {input: 1.0, output: 5.0}
+        sonnet: {input: 3.0, output: 15.0}
+    openai_compat:
+      api_key_env: "OPENAI_API_KEY"
+      base_url: "https://api.openai.com/v1"
+      default_model: "gpt-4o-mini"
+      verdict_model: "gpt-4o"
+      pricing:
+        default: {input: 0.15, output: 0.60}
+        verdict: {input: 2.50, output: 10.00}
+    dummy:
+      pricing: {default: {input: 0, output: 0}}
+    dummy_priced:                # 带 mock pricing, 让 budget_guard 在离线测试可触发
+      pricing: {default: {input: 1.0, output: 5.0}}
+  search:
+    active: "duckduckgo"
+    duckduckgo:
+      retries: 2
+      retry_sleep_seconds: 3
+    anthropic_tool:
+      requires_llm: "anthropic"
+      cost_per_call_usd: 0.01
+    dummy: {}
+
+# 预算保护
+budget:
+  daily_usd_cap: 0.50
+  on_exceeded: "fallback_free"
+  cost_log: "./data_cache/cost_log.jsonl"
+
+# 输出
+output:
+  jsonl_dir: "logs"
+  md_companion: true
+  retention_days: 30
+  include_entity_chain: true
+
+# 降级
+fallback:
+  on_akshare_fail: "continue"
+  on_baostock_fail: "continue"
+  on_tdx_fin_fail: "fallback_baostock"
+  on_llm_fail: "fallback_free"
+  on_search_fail: "skip_entity"

@@ -1,0 +1,11 @@
+data:
+  tdx_dir: "/nonexistent/tdx"
+  tdx_fin_dir: "/nonexistent/tdx_fin"
+  stock_names_csv: "/nonexistent/stock_names.csv"
+sources:
+  tdx_fin: {enabled: true}
+  akshare: {enabled: true}
+mode:
+  default: free
+output:
+  jsonl_dir: "logs"

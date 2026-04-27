@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# 全量/增量拉取 A 股日线数据
+# 已有数据的股票自动跳过（断点续传），只拉缺失或过期的部分
+
+set -e
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+
+QUANT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+LOG="$QUANT_DIR/logs/pull_full.log"
+PID_FILE="$QUANT_DIR/logs/pull_full.pid"
+
+mkdir -p "$QUANT_DIR/logs"
+
+# ── --status 查看进度 ──────────────────────────────────────────
+if [[ "$1" == "--status" ]]; then
+    if [[ ! -f "$LOG" ]]; then
+        echo "尚未启动过拉取任务。"
+        exit 0
+    fi
+    echo "=== 最新进度 ==="
+    # 只显示最新一次运行的日志（从最后一个 "Total/Starting" 行开始）
+    START_LINE=$(grep -n "Total [0-9]\+ stocks\|Starting update" "$LOG" | tail -1 | cut -d: -f1)
+    if [[ -n "$START_LINE" ]]; then
+        tail -n +"$START_LINE" "$LOG" | tail -20
+    else
+        tail -20 "$LOG"
+    fi
+    COUNT=$(ls "$QUANT_DIR/data/daily/"*.parquet 2>/dev/null | wc -l)
+    TOTAL=5198
+    PCT=$((COUNT * 100 / TOTAL))
+    echo ""
+    echo "磁盘文件数（实时）：$COUNT / $TOTAL  ($PCT%)"
+    echo "注：日志里的 Progress 是每 100 只打一次，文件数是实时值，两者会有差距属正常"
+    if [[ -f "$PID_FILE" ]]; then
+        PID=$(cat "$PID_FILE")
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "状态：运行中 (PID=$PID)"
+        else
+            echo "状态：已完成（或异常退出）"
+            rm -f "$PID_FILE"
+        fi
+    fi
+    exit 0
+fi
+
+# ── 检查是否已有进程在运行 ────────────────────────────────────
+if [[ -f "$PID_FILE" ]]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "⚠️  已有拉取任务在运行中 (PID=$OLD_PID)"
+        echo ""
+        echo "用 q-pull --status 查看进度"
+        echo ""
+        read -r -p "要终止旧任务并重新开始吗？[y/N] " answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            kill "$OLD_PID" 2>/dev/null && echo "已终止 PID=$OLD_PID"
+            rm -f "$PID_FILE"
+            sleep 1
+        else
+            echo "已取消，保持原任务继续运行。"
+            exit 0
+        fi
+    else
+        rm -f "$PID_FILE"  # 清理过期 PID 文件
+    fi
+fi
+
+# ── 启动新任务 ────────────────────────────────────────────────
+COUNT=$(ls "$QUANT_DIR/data/daily/"*.parquet 2>/dev/null | wc -l)
+echo "启动数据拉取（后台运行）..."
+echo "当前已有数据：$COUNT 只股票"
+echo "日志：$LOG"
+echo "查看进度：q-pull --status"
+echo ""
+
+nohup "$QUANT_DIR/.venv/bin/python" -c "
+import sys; sys.path.insert(0, '$QUANT_DIR')
+from core.data_loader import update_all_daily
+update_all_daily()
+" >> "$LOG" 2>&1 &
+
+echo $! > "$PID_FILE"
+echo "已启动，PID=$!"
+echo "完成后日志末尾会出现：Done. ok=XXXX"

@@ -1,0 +1,7 @@
+baostock
+pandas
+pyarrow
+duckdb
+python-dotenv
+requests
+pytest
