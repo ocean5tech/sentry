@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# q-backtest-fast: 快速 walk-forward 回测 (multi-horizon)
+set -e
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+
+# 用 q-seed 的 venv (含 pandas/numpy/yaml)
+QSEED_VENV="/home/wyatt/sentry/quant/q-seed/.venv"
+
+if [[ ! -f "$QSEED_VENV/bin/python" ]]; then
+    echo "ERROR: q-seed venv 不存在 $QSEED_VENV" >&2
+    exit 1
+fi
+
+exec "$QSEED_VENV/bin/python" -u "$ROOT/main_fast.py" "$@"
