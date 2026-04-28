@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# q-backtest: walk-forward 回测 q-seed
+set -e
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")"
+
+if [[ ! -f "$ROOT/.venv/bin/activate" ]]; then
+    echo "ERROR: q-backtest/.venv 不存在. 先跑: cd $ROOT && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+exec "$ROOT/.venv/bin/python" -u "$ROOT/main.py" "$@"

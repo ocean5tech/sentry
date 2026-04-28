@@ -1,0 +1,26 @@
+# q-backtest 回测 config
+
+# q-seed 命令路径
+q_seed_command: "/home/wyatt/sentry/quant/q-seed/q-seed"
+
+# TDX 数据 (跟 q-seed 共享)
+data:
+  tdx_dir: "/home/wyatt/sentry/quant/data/tdx"
+  parquet_fallback_dir: "/home/wyatt/sentry/quant/data/daily"
+
+# 交易日历 cache
+trade_calendar_cache: "./.cache/trade_calendar.csv"
+
+# 默认参数
+defaults:
+  start_date: "2025-08-01"        # 回测起始
+  end_date: "2026-04-22"          # 回测结束 (留 hold_days 余量)
+  hold_days: 20                    # T+1 持仓天数 (用户决定: 20 主升浪 1 月)
+  win_pct: 0.05                    # 胜利阈值: T+hold_days close >= entry × (1 + win_pct)
+  top_per_template: 5              # 每个 as_of_date 每模板取 top N 候选
+  templates: ["hongjing", "litong", "xiangnong", "fujing", "yunnange", "lanqi"]
+
+# 输出
+output:
+  jsonl_dir: "logs"
+  retention_days: 30

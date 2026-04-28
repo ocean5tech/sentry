@@ -9,6 +9,7 @@ data:
   stock_names_csv: "/home/wyatt/sentry/quant/data/stock_names.csv"
 
 # 模板定义 (硬编码, 标杆股)
+# V1.5 (2026-04-27): 加 4 个新模板, 全 strict (用户指定: 想要过拟合, 形态越接近越好)
 templates:
   hongjing:
     code: "301396"
@@ -20,6 +21,26 @@ templates:
     name: "利通电子"
     sig_dates: ["2025-12-10", "2026-01-14", "2026-01-27", "2026-02-02"]
     mode: "loose"
+  xiangnong:
+    code: "300475"
+    name: "香农芯创"
+    sig_dates: ["2025-09-08"]
+    mode: "strict"
+  fujing:
+    code: "002222"
+    name: "福晶科技"
+    sig_dates: ["2025-11-28"]    # 用户给 11-24, 最近 launch 日是 11-28 (+4 天)
+    mode: "strict"
+  yunnange:
+    code: "002428"
+    name: "云南锗业"
+    sig_dates: ["2026-02-27"]    # 用户给 2-24, 最近 launch 日是 2-27 (+3 天)
+    mode: "loose"                 # strict 下 wave 不满足 (HH/Pierce 失败), loose 才能识别
+  lanqi:
+    code: "688008"
+    name: "澜起科技"
+    sig_dates: ["2025-08-22"]    # 用户给 8-06 但前后无 launch, 8-22 是下一个 launch (+16 天)
+    mode: "strict"
 
 # 形态参数
 wave_params:
@@ -62,7 +83,7 @@ output:
   # balance_per_template: true → top 名额对半分, hongjing TOP/2 + litong TOP/2
   # min_per_template: 某一边至少有 N 个 (有候选时), 防止全被另一边淹没
   balance_per_template: true
-  min_per_template: 10
+  min_per_template: 5             # 6 模板下: top 30 → 各 5
 
 # 降级/边界
 fallback:

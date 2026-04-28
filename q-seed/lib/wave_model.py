@@ -2,13 +2,66 @@
 Wave + Pierce 形态识别 + 特征构造.
 端口自 scripts/train_wave_model.py + scripts/find_similar_to_template.py 的 build_features_strict.
 所有阈值/窗口参数通过 WaveParams dataclass 注入, 不硬编码.
+
+V1.5 (2026-04-27): 加大盘趋势特征 (index_pct_20d_sse, index_pct_20d_chinext)
+让候选必须形态像 + 市况像才能高排. 基于 11 起爆日 vs 大盘的实测发现.
 """
 
-from dataclasses import dataclass
+import struct
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+
+
+# ─────── 大盘指数加载 (module-level cache) ───────
+_INDEX_CACHE: dict[str, list[dict]] = {}
+_REC_FMT = "<IIIIIfII"
+_REC_SIZE = struct.calcsize(_REC_FMT)
+
+
+def load_index_day(path: str) -> list[dict]:
+    """读 TDX .day 二进制, 返回 [{date, close}, ...] (按日期升序)."""
+    if path in _INDEX_CACHE:
+        return _INDEX_CACHE[path]
+    rows = []
+    p = Path(path)
+    if not p.exists():
+        _INDEX_CACHE[path] = []
+        return []
+    data = p.read_bytes()
+    for i in range(0, len(data), _REC_SIZE):
+        if i + _REC_SIZE > len(data):
+            break
+        date_int, _o, _h, _l, c, _, _, _ = struct.unpack(_REC_FMT, data[i:i+_REC_SIZE])
+        y, md = divmod(date_int, 10000)
+        m, d = divmod(md, 100)
+        rows.append({"date": date(y, m, d), "close": c / 100.0})
+    rows.sort(key=lambda r: r["date"])
+    _INDEX_CACHE[path] = rows
+    return rows
+
+
+def index_pct_n_days(rows: list[dict], target_date: date, n: int = 20) -> float:
+    """target_date 前 n 日累计涨跌. 返回 0.0 if 数据不足."""
+    if not rows:
+        return 0.0
+    target_idx = None
+    for i, r in enumerate(rows):
+        if r["date"] <= target_date:
+            target_idx = i
+        else:
+            break
+    if target_idx is None or target_idx < n:
+        return 0.0
+    today_close = rows[target_idx]["close"]
+    prev_close = rows[target_idx - n]["close"]
+    if prev_close <= 0:
+        return 0.0
+    return (today_close - prev_close) / prev_close
 
 
 @dataclass
@@ -25,6 +78,11 @@ class WaveParams:
     spike_skip: int = 5
     min_triangle_len: int = 9
     price_center: float = 80.0
+    # V1.5 大盘趋势特征
+    use_market_features: bool = True
+    market_window_days: int = 20
+    index_path_sse: str = "/home/wyatt/sentry/quant/data/tdx/sh/lday/sh000001.day"
+    index_path_chinext: str = "/home/wyatt/sentry/quant/data/tdx/sz/lday/sz399006.day"
 
     @classmethod
     def from_dict(cls, d: dict) -> "WaveParams":
@@ -249,6 +307,31 @@ def build_features_strict(historical, trigger, C, H, L, n, entry_close,
     # 3. 入场价位
     feats["in_60_100"] = int(60 <= entry_close <= 100)
     feats["log_entry_dist_80"] = float(np.log(entry_close / wp.price_center)) if entry_close > 0 else 0.0
+
+    # 4. V1.5 大盘趋势特征 (起爆日前 N 日大盘累计涨跌)
+    if wp.use_market_features:
+        # sig_date 是 isoformat string 或 date object
+        if isinstance(sig_date, str):
+            try:
+                sig_d = date.fromisoformat(sig_date)
+            except ValueError:
+                sig_d = None
+        elif hasattr(sig_date, "year"):
+            sig_d = sig_date if isinstance(sig_date, date) else date(sig_date.year, sig_date.month, sig_date.day)
+        else:
+            sig_d = None
+
+        if sig_d is not None:
+            sse_rows = load_index_day(wp.index_path_sse)
+            chinext_rows = load_index_day(wp.index_path_chinext)
+            feats["index_pct_20d_sse"] = index_pct_n_days(sse_rows, sig_d, wp.market_window_days)
+            feats["index_pct_20d_chinext"] = index_pct_n_days(chinext_rows, sig_d, wp.market_window_days)
+        else:
+            feats["index_pct_20d_sse"] = 0.0
+            feats["index_pct_20d_chinext"] = 0.0
+    else:
+        feats["index_pct_20d_sse"] = 0.0
+        feats["index_pct_20d_chinext"] = 0.0
 
     return feats
 

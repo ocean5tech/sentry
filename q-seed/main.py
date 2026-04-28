@@ -28,8 +28,10 @@ def parse_args():
     )
     ap.add_argument("--top", type=int, default=None,
                     help="输出 TOP N (默认读 config.output.default_top=30)")
-    ap.add_argument("--template", choices=["hongjing", "litong", "both"], default="both",
-                    help="只跑某模板 (默认 both, 合并去重后按最小距离排序)")
+    ap.add_argument("--template", default="both",
+                    help="只跑某模板 (hongjing/litong/xiangnong/fujing/yunnange/lanqi/both, 默认 both)")
+    ap.add_argument("--as-of-date", dest="as_of_date", default=None,
+                    help="模拟某天 (YYYY-MM-DD), 限制 K 线数据 < 该日期, 用于 walk-forward 回测避免 look-ahead bias")
     ap.add_argument("--input", dest="input_file", default=None,
                     help="输入 JSON Lines 文件 (或 -) 限定扫描范围")
     ap.add_argument("--since", default=None, help="sig_date >= 此日期 (YYYY-MM-DD)")
@@ -184,12 +186,29 @@ def main():
     setup_data_paths(cfg)
 
     # 此时 lib/core 已配置好, 可以正常 import
-    from core.data_loader import load_daily
+    from core.data_loader import load_daily as _load_daily_raw
     from core.tdx_loader import list_tdx_symbols
     from core.stock_names import get_names
     from wave_model import WaveParams, FilterParams
     from similar_knn import compute_distances, filter_recent, topn_by_distance
     from kline_snapshot import SafetyThresholds, make_snapshot
+
+    # --as-of-date: 限制 K 线 < 该日期 (避免 walk-forward look-ahead bias)
+    as_of_date = None
+    if args.as_of_date:
+        from datetime import date as _date
+        try:
+            as_of_date = _date.fromisoformat(args.as_of_date)
+            print(f"[q-seed] as-of-date {as_of_date}: 限制 K 线 < 该日期", file=sys.stderr)
+        except ValueError:
+            die(f"--as-of-date 格式错: {args.as_of_date} (应 YYYY-MM-DD)", code=2)
+
+    def load_daily(symbol):
+        df = _load_daily_raw(symbol)
+        if df is None or df.empty or as_of_date is None:
+            return df
+        # 截断到 as_of_date 之前 (含)
+        return df[df["date"].dt.date < as_of_date].reset_index(drop=True)
 
     wp = WaveParams.from_dict(cfg.get("wave_params", {}))
     fp = FilterParams.from_dict(cfg.get("filter", {}))
@@ -416,6 +435,9 @@ def main():
                     "amp_mean": round(float(r.get("amp_mean", 0)), 4),
                     "is_20cm": int(r.get("is_20cm", 0)),
                     "is_st": int(r.get("is_st", 0)),
+                    # V1.5 大盘趋势特征
+                    "index_pct_20d_sse": round(float(r.get("index_pct_20d_sse", 0)), 4),
+                    "index_pct_20d_chinext": round(float(r.get("index_pct_20d_chinext", 0)), 4),
                 }
             else:
                 details[tname] = None
