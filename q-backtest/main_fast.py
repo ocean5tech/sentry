@@ -54,6 +54,10 @@ def parse_args():
     ap.add_argument("--hold-days", default="5,10,20,40,80",
                     help="持仓天数列表 (逗号分隔, 默认 5,10,20,40,80)")
     ap.add_argument("--win-pct", type=float, default=0.05, help="胜利阈值 (默认 +5%)")
+    ap.add_argument("--max-drawdown-allowed", type=float, default=0.07,
+                    help="持仓体验好允许的最大浮亏 (默认 0.07 = 7%)")
+    ap.add_argument("--big-win-pct", type=float, default=0.50,
+                    help="大牛股阈值 (默认 0.50 = +50%, 报告 TOP 用)")
     ap.add_argument("--top", type=int, default=5, help="每模板 top N 候选 (默认 5)")
     ap.add_argument("--templates", default=None, help="逗号分隔模板, 默认全部 6 个")
     ap.add_argument("--qseed-config", default="/home/wyatt/sentry/quant/q-seed/config.yaml")
@@ -251,7 +255,8 @@ def main():
             for _, row in top_df.iterrows():
                 code = row["code"]
                 # 取该 code 在 as_of_d 之后的多 horizon 表现
-                mh = evaluate_multi(code, as_of_d, hold_days_list, args.win_pct, tdx_dir)
+                mh = evaluate_multi(code, as_of_d, hold_days_list, args.win_pct, tdx_dir,
+                                    max_drawdown_allowed=args.max_drawdown_allowed)
                 rec = {
                     "as_of_date": as_of_d.isoformat(),
                     "template": tname,
@@ -305,6 +310,52 @@ def main():
             avg_ret = sum(r["horizons"][hd]["ret"] for r in rs) / n * 100
             avg_dd = sum(r["horizons"][hd]["max_drawdown"] for r in rs) / n * 100
             print(f"  {hd:3d} 天        {wins}/{n} = {wins/n*100:5.1f}%    {goods}/{n} = {goods/n*100:5.1f}%    {avg_ret:+6.2f}%    {avg_dd:+6.2f}%")
+
+    # ─── 大牛股 TOP 表 (按 80d ret >= big_win_pct, 含 sig_date 让用户验证) ───
+    print()
+    print("=" * 100)
+    print(f"🌟 大牛股清单 (80 天 ret >= {args.big_win_pct*100:.0f}%)")
+    print("=" * 100)
+
+    biggest_hd = max(hold_days_list)
+    for tname in template_names:
+        recs = [r for r in all_results
+                if r["template"] == tname
+                and r["skipped_reason"] is None
+                and biggest_hd in r["horizons"]
+                and "reason" not in r["horizons"][biggest_hd]
+                and r["horizons"][biggest_hd]["ret"] >= args.big_win_pct]
+
+        # 按 code dedupe, 保留 80d ret 最大的一条 (含其 sig_date / as_of_date)
+        by_code: dict = {}
+        for r in recs:
+            ret = r["horizons"][biggest_hd]["ret"]
+            if r["code"] not in by_code or ret > by_code[r["code"]]["horizons"][biggest_hd]["ret"]:
+                by_code[r["code"]] = r
+
+        ranked = sorted(by_code.values(), key=lambda r: r["horizons"][biggest_hd]["ret"], reverse=True)
+        if not ranked:
+            print(f"\n{tname}: 无 80d ret >= {args.big_win_pct*100:.0f}% 的命中")
+            continue
+
+        # 计算各 code 的命中频次 (多 as_of_date 都识别)
+        freq: dict = {}
+        for r in all_results:
+            if r["template"] == tname and r["skipped_reason"] is None:
+                freq[r["code"]] = freq.get(r["code"], 0) + 1
+
+        print(f"\n{tname}: {len(ranked)} 只独立大牛股")
+        print(f"  {'code':<8}{'name':<14}{'sig_date':<14}{'入场':>10}{'80d ret':>10}{'max_dd':>10}{'频次':>8}")
+        for r in ranked[:15]:    # 每模板 top 15
+            code = r["code"]
+            name = (r.get("name") or "")[:12]
+            sd = r["sig_date"]
+            entry = r.get("entry_price", "-")
+            h = r["horizons"][biggest_hd]
+            ret = h["ret"] * 100
+            dd = h["max_drawdown"] * 100
+            cnt = freq.get(code, 1)
+            print(f"  {code:<8}{name:<14}{sd:<14}{entry:>10}{ret:>+8.0f}%  {dd:>+7.1f}%  {cnt:>7}")
 
     print("\n" + "=" * 100)
     print(f"详细 jsonl: {out_path}")

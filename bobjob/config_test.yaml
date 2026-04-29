@@ -1,0 +1,53 @@
+# 短线尾盘买早盘卖策略配置 - 测试版本（小样本快速验证）
+
+strategy:
+  name: "尾盘买早盘卖"
+  description: "下午2:30-2:50选缩量阴线回调10日线的活跃票，次日早盘卖出"
+  
+  # 选股时间窗口
+  selection_time:
+    start: "14:30"
+    end: "14:50"
+  
+  # 选股条件
+  selection_criteria:
+    volume_shrink_ratio: 0.7
+    is_red_candle: false
+    ma10_distance_min: -0.02
+    ma10_distance_max: 0.01
+    active_days: 20
+    active_volume_ratio: 1.5
+    active_min_days: 5
+    price_min: 5.0
+    price_max: 100.0
+    exclude_st: true
+    exclude_new_stock_days: 60
+  
+  # 次日卖出规则
+  exit_rules:
+    low_open_threshold: -0.01
+    break_ma10_sell: true
+    sell_time_morning: "10:00"
+    sell_on_peak: true
+    sell_on_break_vwap: true
+    max_hold_days: 2
+
+# 回测参数 - 测试版本（3个月，300只股票）
+backtest:
+  start_date: "2026-01-01"  # 缩短到3个月
+  end_date: "2026-04-28"
+  initial_capital: 100000
+  max_positions: 5
+  commission_rate: 0.0003
+  slippage_rate: 0.001
+  
+  # 股票池限制（测试用）
+  max_symbols: 300  # 只测试前300只股票
+  
+  output_dir: "./logs"
+  report_format: ["csv", "md"]
+
+# 数据源
+data:
+  tdx_dir: "/home/wyatt/bob/sentry/quant/data/tdx"
+  stock_names_csv: "/home/wyatt/bob/sentry/quant/data/stock_names.csv"

@@ -55,7 +55,8 @@ def get_kline(code: str, tdx_dir: str) -> list[dict]:
 
 
 def evaluate_multi(code: str, as_of_date: date, hold_days_list: list[int],
-                   win_pct: float, tdx_dir: str) -> dict:
+                   win_pct: float, tdx_dir: str,
+                   max_drawdown_allowed: float = 0.07) -> dict:
     """对一个 (code, as_of_date) 一次性算多个 hold_days 的结果.
 
     返回 {
@@ -118,7 +119,9 @@ def evaluate_multi(code: str, as_of_date: date, hold_days_list: list[int],
         ret = (exit_price - entry_price) / entry_price
         max_dd = (min_low - entry_price) / entry_price
         win = ret >= win_pct
-        good_exp = win and (min_low >= entry_price)
+        # 持仓体验好: win AND 持仓中 low 不低于 entry × (1 - max_drawdown_allowed)
+        # max_drawdown_allowed=0.07 → 允许 7% 浮亏 (用户决定)
+        good_exp = win and (min_low >= entry_price * (1 - max_drawdown_allowed))
 
         base_result["horizons"][hd] = {
             "exit_date": exit_row["date"].isoformat(),
