@@ -20,6 +20,18 @@ defaults:
   top_per_template: 5              # 每个 as_of_date 每模板取 top N 候选
   templates: ["hongjing", "litong", "xiangnong", "fujing", "yunnange", "lanqi"]
 
+# 每模板的 dist 上限 (距离 = 越小越像模板)
+# 回测发现: hongjing/xiangnong/fujing 在 dist<5 时胜率明显更高
+# yunnange/lanqi 的 dist 分布不同, 不限制也表现好
+# litong 已停用但保留配置
+dist_thresholds:
+  hongjing:  5.0   # dist<5: 56% win @80d vs 42% 全量
+  xiangnong: 5.0   # dist<5: 89% win @80d vs 27-35% 松散匹配
+  fujing:    5.0   # dist<5: avg +29% @80d vs +14% 松散匹配
+  yunnange:  ~     # 不限: 78% win 无论 dist, 自然区间 8-20
+  lanqi:     ~     # 不限: dist 高低对胜率无明显影响
+  litong:    ~     # 已停用, 保留配置
+
 # 输出
 output:
   jsonl_dir: "logs"

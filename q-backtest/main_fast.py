@@ -199,6 +199,8 @@ def main():
     print(f"[main] 预扫得 {len(df_all)} 个 sigs", file=sys.stderr)
 
     # ─── Step 2: 对每模板预算 query 向量 (基于全数据 mu/sigma) ───
+    dist_thresholds: dict[str, float | None] = bt_cfg.get("dist_thresholds", {})
+
     template_queries: dict[str, dict] = {}
     for tname in template_names:
         tpl_cfg = all_templates[tname]
@@ -250,6 +252,9 @@ def main():
                                                 q_info["mu"], q_info["sigma"])
             # 每只股保留 dist 最小的 sig
             df_d = df_d.sort_values("dist").drop_duplicates(subset=["code"], keep="first")
+            max_dist = dist_thresholds.get(tname)
+            if max_dist:
+                df_d = df_d[df_d["dist"] <= max_dist]
             top_df = df_d.head(args.top)
 
             for _, row in top_df.iterrows():
