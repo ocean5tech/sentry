@@ -59,7 +59,7 @@ entity_research:
 # Provider 抽象层 (B2 才实施, B1 占位)
 providers:
   llm:
-    active: "anthropic"
+    active: "deepseek"
     anthropic:
       api_key_env: "ANTHROPIC_API_KEY"
       default_model: "claude-haiku-4-5-20251001"
