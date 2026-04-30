@@ -79,6 +79,14 @@ providers:
       pricing:
         default: {input: 0.15, output: 0.60}
         verdict: {input: 2.50, output: 10.00}
+    deepseek:
+      api_key_env: "DEEPSEEK_API_KEY"
+      base_url: "https://api.deepseek.com/v1"
+      default_model: "deepseek-chat"
+      verdict_model: "deepseek-reasoner"
+      pricing:
+        default: {input: 0.27, output: 1.10}
+        verdict: {input: 0.55, output: 2.19}
     dummy:
       pricing: {default: {input: 0, output: 0}}
     dummy_priced:

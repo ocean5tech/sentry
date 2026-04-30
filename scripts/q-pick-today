@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# q-pick-today: 一键当日选股 + q-fin 深度推理 + 企业微信推送
+set -e
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")/.."
+QSEED_VENV="$ROOT/q-seed/.venv"
+
+if [[ ! -f "$QSEED_VENV/bin/python" ]]; then
+    echo "ERROR: q-seed venv 不存在 $QSEED_VENV" >&2
+    exit 1
+fi
+
+exec "$QSEED_VENV/bin/python" -u "$ROOT/q-pick-today/main.py" "$@"

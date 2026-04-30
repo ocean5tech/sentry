@@ -132,8 +132,10 @@ def build_msg(rec: dict, tpl_info: dict, fin_data: dict | None,
     msg = []
     msg.append(f"# 📈 {name} ({code}) {stars}")
     msg.append("")
+    explosion_type = rec.get("explosion_type", "首次")
+    explosion_mark = "★★ 再次起爆 (80d胜率87%)" if explosion_type == "再次" else "首次起爆 (80d胜率56%)"
     msg.append(f"**模板**: {tpl} (历史 80d 胜率 {win80*100:.0f}%, 平均 +{avg_ret*100:.0f}%)")
-    msg.append(f"**起爆日**: {sig_date} / 形态距离 {dist:.2f}")
+    msg.append(f"**起爆**: {sig_date} [{explosion_mark}] / 形态距离 {dist:.2f}")
     msg.append("")
     msg.append(f"💰 **入场参考价**: {entry_price:.2f} (T+1 收盘)")
     msg.append(f"🎯 **目标价**: {target:.2f} (+{avg_ret*100:.0f}%)")
@@ -281,13 +283,14 @@ def main():
         return
 
     # ─── Step 4: 评级 ⭐ ───
+    # 回测数据: 2025-08-01~2026-04-01, step=1, dist<5严格匹配
     TPL_STATS = {
-        "yunnange":  {"win80": 0.78, "avg_ret80": 0.31},
-        "lanqi":     {"win80": 0.55, "avg_ret80": 0.17},
-        "hongjing":  {"win80": 0.47, "avg_ret80": 0.13},
-        "fujing":    {"win80": 0.47, "avg_ret80": 0.21},
-        "litong":    {"win80": 0.39, "avg_ret80": 0.09},
-        "xiangnong": {"win80": 0.38, "avg_ret80": 0.08},
+        "yunnange":  {"win80": 0.775, "avg_ret80": 0.317},
+        "lanqi":     {"win80": 0.548, "avg_ret80": 0.166},
+        "hongjing":  {"win80": 0.558, "avg_ret80": 0.186},
+        "fujing":    {"win80": 0.491, "avg_ret80": 0.314},
+        "litong":    {"win80": 0.406, "avg_ret80": 0.098},
+        "xiangnong": {"win80": 0.895, "avg_ret80": 0.606},
     }
     for r in same_day:
         tpl = r["template"]

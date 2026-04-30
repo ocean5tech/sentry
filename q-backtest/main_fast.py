@@ -229,6 +229,9 @@ def main():
 
     recent_days = wp.lookback   # 60 默认
 
+    # 追踪每只股已出现过的 sig_date, 用来标记首次/再次起爆
+    seen_sig: dict[str, set] = {}  # code -> set of sig_dates seen before as_of_d
+
     for i, as_of_d in enumerate(bt_days, 1):
         if i % 20 == 0 or i == 1 or i == len(bt_days):
             elapsed = time.time() - t_start
@@ -259,6 +262,12 @@ def main():
 
             for _, row in top_df.iterrows():
                 code = row["code"]
+                sig_date = row["sig_date"]
+                # 首次 vs 再次起爆: 该 code 此 sig_date 之前是否出现过
+                prev = seen_sig.get(code, set())
+                explosion_type = "再次" if prev else "首次"
+                seen_sig.setdefault(code, set()).add(sig_date)
+
                 # 取该 code 在 as_of_d 之后的多 horizon 表现
                 mh = evaluate_multi(code, as_of_d, hold_days_list, args.win_pct, tdx_dir,
                                     max_drawdown_allowed=args.max_drawdown_allowed)
@@ -267,7 +276,8 @@ def main():
                     "template": tname,
                     "code": code,
                     "name": row.get("name", ""),
-                    "sig_date": row["sig_date"],
+                    "sig_date": sig_date,
+                    "explosion_type": explosion_type,
                     "template_dist": round(float(row["dist"]), 3),
                     "skipped_reason": mh.get("skipped_reason"),
                     "entry_date": mh.get("entry_date"),

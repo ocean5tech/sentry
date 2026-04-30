@@ -8,6 +8,7 @@ from .llm_dummy import DummyLLM, DummyPricedLLM
 _REGISTRY = {
     "anthropic": AnthropicLLM,
     "openai_compat": OpenAICompatLLM,
+    "deepseek": OpenAICompatLLM,   # DeepSeek 兼容 OpenAI SDK
     "dummy": DummyLLM,
     "dummy_priced": DummyPricedLLM,
 }
