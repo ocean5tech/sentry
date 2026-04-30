@@ -146,21 +146,50 @@ def build_msg(rec: dict, tpl_info: dict, fin_data: dict | None,
     if fin_data:
         v = fin_data.get("verdict") or {}
         er = fin_data.get("entity_research") or {}
+        meta = fin_data.get("meta") or {}
+
+        # --- debug: LLM 模型 + 搜索策略 ---
+        llm_model  = v.get("verdict_model") or (meta.get("providers") or {}).get("llm", "?")
+        llm_prov   = v.get("verdict_provider") or er.get("llm_provider", "?")
+        srch_prov  = er.get("search_provider", "?")
+        msg.append("")
+        msg.append(f"🔧 **[debug]** LLM: `{llm_prov}/{llm_model}` | 搜索: `{srch_prov}`")
+
         if v and v.get("rating"):
             msg.append("")
             msg.append(f"## 🌟 q-fin 综合评级: {v.get('stars', '⭐'*v.get('rating',1))}")
             msg.append(f"**结论**: {v.get('one_liner', '')}")
             if v.get("key_risks"):
                 msg.append("")
-                msg.append(f"**风险**:")
+                msg.append("**风险**:")
                 for k in v["key_risks"][:3]:
                     msg.append(f"- {k[:80]}")
 
+        # --- 推理链 ---
+        steps = er.get("reasoning_steps") or []
+        if steps:
+            msg.append("")
+            msg.append("## 🔍 推理链")
+            for s in steps:
+                depth_indent = "  " * s.get("depth", 0)
+                entity = s.get("entity", "")
+                search_mark = "🔎" if s.get("search_used") else "💾"
+                snippets = s.get("search_snippets") or []
+                conclusion = s.get("conclusion", "")
+                biz = s.get("business_summary", "")
+                msg.append(f"{depth_indent}{search_mark} **{entity}**")
+                for sn in snippets[:2]:
+                    msg.append(f"{depth_indent}  › {sn}")
+                if conclusion:
+                    msg.append(f"{depth_indent}  → {conclusion}")
+                if biz:
+                    msg.append(f"{depth_indent}  __{biz[:70]}__")
+
         if er and er.get("chain"):
             msg.append("")
-            msg.append(f"## 🕸 入主方调研 (深度 {er.get('max_depth_used', 1)} 层, ${er.get('budget_used_usd', 0):.3f})")
+            msg.append(f"## 🕸 实体树 (深度{er.get('max_depth_used',1)}层 ${er.get('budget_used_usd',0):.3f})")
             chain_lines = format_chain(er["chain"])
-            for cl in chain_lines[:30]:    # 截 30 行避免消息太长
+            for cl in chain_lines[:20]:
                 msg.append(cl)
         elif fin_data.get("layer1_triggers"):
             l1 = fin_data["layer1_triggers"]

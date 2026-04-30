@@ -197,11 +197,17 @@ def research(
         "max_uses": web_search_max_uses,
     }] if use_anthropic_tool else None
 
+    reasoning_steps: list[dict] = []   # 推理链: 每步搜索+结论
+
     def _query(entity: str, depth: int) -> dict:
         """单 entity 查询: hints → (web_search via tool 或 prompt-injected snippet) → LLM."""
+        step: dict = {"depth": depth, "entity": entity,
+                      "search_used": False, "search_snippets": [], "conclusion": ""}
         # 1. hints
         hit = _hints_lookup(hints, entity)
         if hit:
+            step["conclusion"] = f"[缓存] {(hit.get('identity') or '')[:60]}"
+            reasoning_steps.append(step)
             return hit
 
         # 2. 外部 search 取证 (仅 non-anthropic provider)
@@ -210,6 +216,8 @@ def research(
             try:
                 results = search.query(entity, max_results=3)
                 evidence = _format_search_evidence(results)
+                step["search_used"] = True
+                step["search_snippets"] = [r.title[:55] for r in results]
             except Exception:
                 evidence = ""
 
@@ -273,6 +281,12 @@ def research(
             parsed["_search_calls"] = (resp.raw or {}).get("search_calls", 0)
         elif evidence:
             parsed["_evidence_used"] = True
+
+        # 记录推理步骤
+        step["conclusion"] = (parsed.get("identity") or "")[:80]
+        step["business_summary"] = (parsed.get("business") or "")[:100]
+        step["model"] = resp.model
+        reasoning_steps.append(step)
         return parsed
 
     def _recurse(entity: str, depth: int) -> dict:
@@ -313,4 +327,7 @@ def research(
         "max_depth_used": max_depth,
         "budget_used_usd": round(budget.per_stock_used(code), 6),
         "chain": chain,
+        "reasoning_steps": reasoning_steps,
+        "llm_provider": getattr(llm, "name", "unknown"),
+        "search_provider": getattr(search, "name", "none") if search else "none",
     }
