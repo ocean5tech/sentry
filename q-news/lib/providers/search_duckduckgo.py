@@ -18,7 +18,10 @@ class DuckDuckGoSearch:
         return 0.0
 
     def query(self, q: str, max_results: int = 5) -> list[SearchResult]:
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
         attempt = 0
         last_err: Exception | None = None
         while attempt <= self.retries:
