@@ -94,6 +94,7 @@ providers:
     duckduckgo:
       retries: 2
       retry_sleep_seconds: 3
+      tavily_fallback_key_env: "TAVILY_API_KEY"   # DDG 失败自动降级 Tavily
     anthropic_tool:
       requires_llm: "anthropic"
       cost_per_call_usd: 0.01
