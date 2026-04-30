@@ -114,6 +114,7 @@ entity_research:
 # 预算保护
 budget:
   daily_usd_cap: 0.50
+  per_stock_cap_usd: 0.05    # cninfo 每条公告 LLM 分析上限
   on_exceeded: "fallback_free"
   cost_log: "./data_cache/cost_log.jsonl"
 

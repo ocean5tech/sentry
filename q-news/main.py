@@ -351,13 +351,113 @@ def main():
     for i, r in enumerate(records, 1):
         r["rank"] = i
 
-    # paid 部分留 V1.5 (q-fin 已实现的 verdict 可在此加, 但 q-news 主要价值在规则)
+    # ===== paid: cninfo 重大公告扫描 + LLM 利多/利空推理 =====
+    cninfo_results: list[dict] = []   # free 模式保持空, 输出部分安全引用
     if mode != "free":
-        info(f"--paid mode set to {mode}, but V0 q-news 仅 rule 引擎. Verdict/entity 留 V1.5.")
-        # placeholder: verdict/entity_research 字段 = null
-        for r in records:
-            r["verdict"] = None
+        from providers.llm_factory import get_llm
+        from providers.search_factory import get_search
+        from budget_guard import BudgetGuard
+        import cninfo_scanner
+        import event_analyst as ea
+
+        llm    = get_llm(cfg["providers"]["llm"])
+        search = get_search(cfg["providers"]["search"])
+        b_cfg = cfg["budget"]
+        budget = BudgetGuard(
+            run_cap_usd=b_cfg["daily_usd_cap"],
+            per_stock_cap_usd=b_cfg.get("per_stock_cap_usd", 0.05),
+            cost_log_path=ROOT / b_cfg.get("cost_log", "data_cache/cost_log.jsonl"),
+            on_exceeded=b_cfg.get("on_exceeded", "fallback_free"),
+        )
+        info(f"paid mode={mode} llm={llm.name} search={search.name}")
+
+        # ── Layer B: cninfo 全市场重大公告 (最近7天) ──────────────────
+        info("扫描 cninfo 最近7天重大公告...")
+        announcements = cninfo_scanner.scan_recent(n_days=7)
+        info(f"过滤后高影响公告: {len(announcements)} 条")
+
+        # 读最近 q-seed/q-backtest 命中记录 (用于交叉验证)
+        qseed_recent_codes: set[str] = set()
+        qbt_logs = sorted((ROOT.parent / "q-backtest" / "logs").glob("q-backtest-fast_*.jsonl"),
+                          reverse=True)
+        if qbt_logs:
+            import json as _json
+            try:
+                for line in qbt_logs[0].read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        r = _json.loads(line)
+                        if r.get("template_dist", 99) < 8:
+                            qseed_recent_codes.add(r.get("code", ""))
+            except Exception:
+                pass
+        info(f"q-seed 近期命中库: {len(qseed_recent_codes)} 只")
+
+        for ann in announcements:
+            if not budget.can_spend(0.001, code=ann["code"])[0]:
+                break
+            analysis = ea.analyze_stock_announcement(
+                llm=llm, budget=budget,
+                code=ann["code"], name=ann["name"],
+                title=ann["title"], ann_type=ann["type"], date=ann["date"],
+            )
+            if analysis is None:
+                continue
+
+            in_qseed = ann["code"] in qseed_recent_codes
+            # 推送决策
+            if analysis.impact == "高":
+                push_decision = "直接推送"
+            elif in_qseed:
+                push_decision = "直接推送"   # 事件+形态双命中
+            elif analysis.impact == "中":
+                push_decision = "交叉验证"
+            else:
+                push_decision = "观察池"
+
+            cninfo_results.append({
+                "code":          ann["code"],
+                "name":          ann["name"],
+                "ann_title":     ann["title"],
+                "ann_type":      ann["type"],
+                "ann_date":      ann["date"],
+                "ann_url":       ann["url"],
+                "direction":     analysis.direction,
+                "impact":        analysis.impact,
+                "logic":         analysis.logic,
+                "push_decision": push_decision,
+                "in_qseed":      in_qseed,
+                "model":         analysis.model,
+                "cost_usd":      analysis.cost_usd,
+            })
+
+        # ── Layer A: 大盘/板块新闻 LLM 推理 (增强现有 events) ─────────
+        top_news = events[:10]   # 取规则引擎已匹配的前10条新闻做 LLM 增强
+        for r in records[:5]:    # 只给 top5 record 加 verdict
+            ev = r.get("_matched_event") or {}
+            title   = ev.get("title", r.get("headline", ""))
+            content = ev.get("content", "") or ev.get("summary", "")
+            source  = ev.get("source", "news")
+            if not title:
+                continue
+            analysis = ea.analyze_market_news(
+                llm=llm, budget=budget,
+                source=source, title=title, content=content,
+            )
+            if analysis:
+                r["verdict"] = {
+                    "direction":        analysis.direction,
+                    "impact":           analysis.impact,
+                    "logic":            analysis.logic,
+                    "affected_sectors": analysis.affected_sectors,
+                    "affected_stocks":  analysis.affected_stocks,
+                    "model":            analysis.model,
+                }
+            else:
+                r["verdict"] = None
             r["entity_research"] = None
+
+        info(f"cninfo 扫描完成: {len(cninfo_results)} 条有效分析, "
+             f"直接推送 {sum(1 for x in cninfo_results if x['push_decision']=='直接推送')} 条")
 
     # meta
     duration_ms = int((time.time() - t0) * 1000)
@@ -393,6 +493,14 @@ def main():
             fp_md = open(f"{op}.md" if args.fmt == "both" else str(op), "w", encoding="utf-8")
 
     fp_auto = open(auto_jsonl, "w", encoding="utf-8")
+
+    # cninfo 结果写到单独文件
+    if cninfo_results:
+        cninfo_path = out_dir / f"q-news_cninfo_{ts}.jsonl"
+        with open(cninfo_path, "w", encoding="utf-8") as cf:
+            for r in cninfo_results:
+                cf.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
+        info(f"cninfo jsonl: {cninfo_path} ({len(cninfo_results)} 条)")
     fp_auto_md = open(auto_md, "w", encoding="utf-8") if cfg.get("output", {}).get("md_companion", True) else None
 
     for r in records:
