@@ -206,7 +206,7 @@ def research(
         # 1. hints
         hit = _hints_lookup(hints, entity)
         if hit:
-            step["conclusion"] = f"[缓存] {(hit.get('identity') or '')[:60]}"
+            step["conclusion"] = (hit.get("identity") or "")[:60]
             reasoning_steps.append(step)
             return hit
 

@@ -174,7 +174,7 @@ def build_msg(rec: dict, tpl_info: dict, fin_data: dict | None,
 
         m.append("")
         m.append("【深度调研 (q-fin)】")
-        m.append(f"🔧 LLM: `{llm_prov}/{llm_model}` | 搜索: `{srch_prov}`")
+        m.append(f"> LLM: {llm_prov}/{llm_model} | 搜索: {srch_prov}")
 
         if v.get("rating"):
             rating_stars = "⭐" * v["rating"]
@@ -192,20 +192,23 @@ def build_msg(rec: dict, tpl_info: dict, fin_data: dict | None,
         steps = er.get("reasoning_steps") or []
         if steps:
             m.append("")
-            m.append("**🔍 推理链:**")
+            m.append("**调研推理链:**")
             for s in steps:
-                indent = "  " * s.get("depth", 0)
-                icon   = "🔎" if s.get("search_used") else "💾"
-                m.append(f"{indent}{icon} **{s['entity']}**")
+                depth = s.get("depth", 0)
+                prefix = "  " * depth + ("- " if depth == 0 else "  - ")
+                src    = "(搜索)" if s.get("search_used") else "(缓存)"
+                entity = s["entity"]
+                conclusion = (s.get("conclusion") or "").replace("[缓存] ", "").replace("[缓存]","")
+                m.append(f"{prefix}**{entity}** {src}")
                 for sn in (s.get("search_snippets") or [])[:2]:
-                    m.append(f"{indent}  › {sn}")
-                if s.get("conclusion"):
-                    m.append(f"{indent}  → {s['conclusion'][:70]}")
+                    m.append(f"{'  '*(depth+1)}  · {sn}")
+                if conclusion:
+                    m.append(f"{'  '*(depth+1)}  结论: {conclusion[:70]}")
                 if s.get("business_summary"):
-                    m.append(f"{indent}  _{s['business_summary'][:80]}_")
+                    m.append(f"{'  '*(depth+1)}  _{s['business_summary'][:80]}_")
 
-        # 实体树
-        if er.get("chain"):
+        # 实体树 (仅 depth>0 时才有额外价值，否则和推理链重复)
+        if er.get("chain") and not steps:
             m.append("")
             m.append(f"**实体树** (深度{er.get('max_depth_used',1)}层 ${er.get('budget_used_usd',0):.3f}):")
             for cl in format_chain(er["chain"])[:15]:
