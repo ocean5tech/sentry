@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# q-pick-today-batch: 交易日 20:00 自动运行
+# 检查今天是交易日 → 同步数据 → q-pick-today → 推送
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")/.."
+LOG="$ROOT/logs/q-pick-today-batch.log"
+mkdir -p "$ROOT/logs"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+
+log "=== q-pick-today-batch 启动 ==="
+
+# 1. 交易日检查
+if ! "$ROOT/scripts/is_trading_day"; then
+    log "今天非交易日, 退出"
+    exit 0
+fi
+log "今天是交易日, 继续"
+
+# 2. 从 Windows 同步今日数据 (若存在)
+TODAY=$(date +%m%d)
+WIN_DIR="/mnt/c/Users/201744672/Downloads/$(date +%Y%m%d)/hsjday${TODAY}"
+if [ -d "$WIN_DIR" ]; then
+    log "同步 $WIN_DIR → data/tdx"
+    BACKUP="$ROOT/data/backup/tdx"
+    LOCAL="$ROOT/data/tdx"
+    rm -rf "$BACKUP" && mv "$LOCAL" "$BACKUP" && mkdir -p "$LOCAL"
+    rsync -a "$WIN_DIR/" "$LOCAL/" 2>>"$LOG"
+    log "同步完成"
+else
+    log "Windows 数据目录不存在: $WIN_DIR, 使用现有 data/tdx"
+fi
+
+# 3. 跑 q-pick-today
+log "启动 q-pick-today..."
+"$ROOT/scripts/q-pick-today" --skip-sync 2>>"$LOG"
+log "q-pick-today 完成"
+
+log "=== q-pick-today-batch 结束 ==="

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# q-news-daily-batch: 交易日 20:00 自动运行
+# 检查今天是交易日 → q-news --paid → 自动推送
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")/.."
+LOG="$ROOT/logs/q-news-daily-batch.log"
+mkdir -p "$ROOT/logs"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+
+log "=== q-news-daily-batch 启动 ==="
+
+# 1. 交易日检查
+if ! "$ROOT/scripts/is_trading_day"; then
+    log "今天非交易日, 退出"
+    exit 0
+fi
+log "今天是交易日, 继续"
+
+# 2. 加载 .env
+if [ -f "$ROOT/.env" ]; then
+    set -a; source "$ROOT/.env"; set +a
+fi
+
+# 3. 跑 q-news --paid --push
+log "启动 q-news --paid --push..."
+"$ROOT/q-news/q-news" --paid --push 2>>"$LOG"
+log "q-news 完成"
+
+log "=== q-news-daily-batch 结束 ==="

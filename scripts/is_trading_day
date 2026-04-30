@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""
+判断今天（或指定日期）是否为 A 股交易日.
+用法:
+  is_trading_day          # 今天是交易日? 0=是 1=否
+  is_trading_day 20260506 # 指定日期
+退出码: 0=交易日, 1=非交易日
+"""
+import struct, sys
+from datetime import date
+from pathlib import Path
+
+TDX_SSE = "/home/wyatt/sentry/quant/data/tdx/sh/lday/sh000001.day"
+
+def trading_dates() -> set[int]:
+    path = Path(TDX_SSE)
+    if not path.exists():
+        return set()
+    fmt = "<IIIIIfII"
+    sz = struct.calcsize(fmt)
+    data = path.read_bytes()
+    return {struct.unpack(fmt, data[i:i+sz])[0]
+            for i in range(0, len(data) - sz + 1, sz)}
+
+def main():
+    if len(sys.argv) > 1:
+        d = int(sys.argv[1])
+    else:
+        t = date.today()
+        d = t.year * 10000 + t.month * 100 + t.day
+
+    dates = trading_dates()
+    if not dates:
+        print(f"ERROR: 无法读取交易日历 {TDX_SSE}", file=sys.stderr)
+        sys.exit(2)
+
+    if d in dates:
+        print(f"{d} 是交易日")
+        sys.exit(0)
+    else:
+        print(f"{d} 非交易日")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

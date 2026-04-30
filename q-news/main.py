@@ -43,6 +43,8 @@ def parse_args():
     ap.add_argument("--tags", default=None, help="只输出命中这些 tag 的")
     ap.add_argument("--format", dest="fmt", choices=["jsonl", "md", "both"], default="jsonl")
     ap.add_argument("--output", default=None)
+    ap.add_argument("--push", action="store_true",
+                    help="分析完成后自动推企业微信 (需 WECHAT_WEBHOOK_URL)")
     ap.add_argument("--config", default=str(ROOT / "config.yaml"))
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--dry-run", action="store_true",
@@ -536,6 +538,81 @@ def main():
         fp_jsonl.close()
 
     info(f"done. {len(records)} records. logs: {auto_jsonl.name} ({duration_ms/1000:.1f}s)")
+
+    # ===== 自动推送 (--push) =====
+    if args.push and cninfo_results:
+        _push_cninfo(cninfo_results)
+
+
+def _push_cninfo(cninfo_results: list[dict]):
+    """把 cninfo 分析结果推企业微信: 利多逐条 + 利空汇总."""
+    import os, urllib.request
+    from pathlib import Path as _Path
+
+    webhook = os.environ.get("WECHAT_WEBHOOK_URL", "")
+    if not webhook:
+        env = _Path(__file__).parent.parent / ".env"
+        if env.exists():
+            for line in env.read_text().splitlines():
+                if line.startswith("WECHAT_WEBHOOK_URL="):
+                    webhook = line.split("=", 1)[1].strip()
+    if not webhook:
+        warn("WECHAT_WEBHOOK_URL 未设置, 跳过推送")
+        return
+
+    def _post(content: str):
+        body = {"msgtype": "markdown", "markdown": {"content": content[:4000]}}
+        req = urllib.request.Request(
+            webhook,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            r = json.loads(resp.read().decode("utf-8"))
+            return r.get("errcode") == 0
+
+    import time as _time
+    today = datetime.now().strftime("%Y-%m-%d")
+    push_now  = [r for r in cninfo_results if r["push_decision"] == "直接推送"]
+    bullish   = [r for r in push_now if r["direction"] == "利多"]
+    bearish   = [r for r in push_now if r["direction"] == "利空"]
+    skip_codes = {"ST", "*ST"}   # ST股不推利多
+
+    pushed = 0
+    for r in bullish:
+        if any(s in r["name"] for s in skip_codes):
+            continue
+        qseed = " **(q-seed形态命中)**" if r.get("in_qseed") else ""
+        msg = (
+            f"## 📊 {today} · 公告事件信号\n\n"
+            f"**{r['name']} ({r['code']})** — 利多 {r['impact']}影响{qseed}\n\n"
+            f"【公告】{r['ann_title'][:60]}\n"
+            f"【日期】{r['ann_date']}  【类型】{r['ann_type']}\n\n"
+            f"【分析 ({r['model']})】\n"
+            f"方向: **{r['direction']}** | 影响: **{r['impact']}**\n"
+            f"逻辑: {r['logic'][:200]}\n\n"
+            f"> 来源: cninfo 7天公告扫描\n\n"
+            f"---\n⚠️ 仅供研究参考，不构成投资建议"
+        )
+        ok = _post(msg)
+        info(f"推送 利多 {r['code']} {r['name']}: {'ok' if ok else 'fail'}")
+        pushed += 1
+        _time.sleep(2)
+
+    if bearish:
+        lines = [f"## ⚠️ {today} · 风险事件警示", "",
+                 f"共 **{len(bearish)} 只**股票出现高影响利空公告 (股权冻结/资金占用/立案)：", ""]
+        for r in bearish[:8]:
+            lines.append(f"- **{r['name']} ({r['code']})** — {r['ann_title'][:40]}")
+            lines.append(f"  {r['logic'][:70]}")
+        if len(bearish) > 8:
+            lines.append(f"- ...还有 {len(bearish)-8} 条")
+        lines += ["", "> 以上建议回避或关注止损"]
+        ok = _post("\n".join(lines))
+        info(f"推送 利空汇总 ({len(bearish)}条): {'ok' if ok else 'fail'}")
+        pushed += 1
+
+    info(f"推送完成: {pushed} 条消息")
 
 
 if __name__ == "__main__":
