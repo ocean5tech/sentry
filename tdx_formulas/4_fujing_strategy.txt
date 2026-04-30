@@ -1,0 +1,99 @@
+{通达信选股公式 - 福晶科技形态策略}
+{模板股票: 002222 福晶科技}
+{起爆日: 2025-11-28}
+{模式: Strict - 严格模式}
+{特征: 光学材料板块，价格稳健上涨，波峰递增明显}
+
+{==================== 核心参数 ====================}
+LAUNCH_RET:=0.05;        {起爆涨幅≥5%}
+VOL_MUL:=2.0;            {成交量≥20日均量2倍}
+LOOKBACK:=60;            {回溯60日}
+MIN_WAVE:=2;             {至少2个波}
+
+{==================== 起爆日识别 ====================}
+RET:=(C-REF(C,1))/REF(C,1);
+V_MA20:=REF(MA(V,20),1);
+IS_LAUNCH:=RET>=LAUNCH_RET AND V>V_MA20*VOL_MUL AND V_MA20>0;
+
+{最近60日起爆次数}
+WAVE_COUNT:=COUNT(IS_LAUNCH,LOOKBACK);
+
+{==================== 福晶特征：稳健上涨 ====================}
+{波峰严格递增}
+HH10:=HHV(H,10);
+HH20:=HHV(H,20);
+HH40:=HHV(H,40);
+PEAK_RISING:=HH10>=HH20*0.98 AND HH20>=HH40*0.95;
+
+{波谷也递增（HL递增）}
+LL10:=LLV(L,10);
+LL20:=LLV(L,20);
+LL40:=LLV(L,40);
+TROUGH_RISING:=LL10>=LL20*0.95 AND LL20>=LL40*0.92;
+
+{==================== 福晶特征：Pierce条件严格 ====================}
+{回调不破起爆点开盘价}
+{用最近20日低点相对前期高点的回撤}
+PULLBACK_RATIO:=(HH20-LL10)/HH20;
+PIERCE_OK:=PULLBACK_RATIO<0.20;
+
+{==================== 福晶特征：价格位置 ====================}
+MA20:=MA(C,20);
+MA60:=MA(C,60);
+{价格在均线上方，趋势明确}
+PRICE_ABOVE:=C>MA20 AND MA20>MA60;
+
+{==================== 福晶特征：成交量稳定放大 ====================}
+VOL5:=MA(V,5);
+VOL20:=MA(V,20);
+{成交量温和放大}
+VOL_STEADY:=VOL5>VOL20*1.05 AND VOL5<VOL20*2.0;
+
+{==================== 福晶特征：振幅适中 ====================}
+AMP20:=(HHV(H,20)-LLV(L,20))/LLV(L,20);
+{振幅15%-35%}
+AMP_MODERATE:=AMP20>0.15 AND AMP20<0.35;
+
+{==================== 福晶特征：收盘价位置 ====================}
+{收盘价接近当日最高价（强势）}
+CLOSE_HIGH:=C>H*0.95;
+
+{==================== 福晶特征：趋势连续性 ====================}
+{MA5持续在MA20上方}
+MA5:=MA(C,5);
+TREND_STABLE:=COUNT(MA5>MA20,10)>=8;
+
+{==================== 综合条件 ====================}
+{基础条件}
+BASE:=WAVE_COUNT>=MIN_WAVE AND NOT(NAMELIKE('ST') OR NAMELIKE('*ST'));
+
+{福晶严格条件}
+FUJING_COND:=BASE 
+    AND PEAK_RISING 
+    AND TROUGH_RISING 
+    AND PIERCE_OK 
+    AND PRICE_ABOVE 
+    AND VOL_STEADY 
+    AND AMP_MODERATE;
+
+{==================== 买入信号 ====================}
+{今日是起爆日 且 满足福晶形态}
+BUY_TODAY:=IS_LAUNCH AND FUJING_COND;
+
+{==================== 输出显示 ====================}
+{主信号线}
+XG:BUY_TODAY,COLORYELLOW,LINETHICK3;
+
+{买入点标注}
+STICKLINE(BUY_TODAY,C*0.93,C*1.07,8,0),COLORYELLOW;
+DRAWTEXT(BUY_TODAY,L*0.92,'★★福晶买点★★'),COLORYELLOW;
+DRAWTEXT(BUY_TODAY,L*0.88,'T+1开盘买入'),COLORWHITE;
+
+{形态特征标注}
+DRAWTEXT(PEAK_RISING,H*1.02,'峰升'),COLORCYAN;
+DRAWTEXT(TROUGH_RISING,L*0.94,'谷升'),COLORGREEN;
+DRAWTEXT(IS_LAUNCH,L*0.96,'起爆'),COLORMAGENTA;
+DRAWTEXT(TREND_STABLE,H*1.04,'趋势稳'),COLORRED;
+
+{==================== 选股条件 ====================}
+BUY_TODAY;

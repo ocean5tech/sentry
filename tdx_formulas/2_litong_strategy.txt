@@ -1,0 +1,93 @@
+{通达信选股公式 - 利通电子形态策略}
+{模板股票: 603629 利通电子}
+{起爆日: 2025-12-10, 2026-01-14, 2026-01-27, 2026-02-02}
+{模式: Loose - 宽松模式}
+{特征: 允许W型走势，Pierce条件宽松，HL允许1次例外}
+
+{==================== 核心参数 ====================}
+LAUNCH_RET:=0.05;        {起爆涨幅≥5%}
+VOL_MUL:=2.0;            {成交量≥20日均量2倍}
+LOOKBACK:=60;            {回溯60日}
+MIN_WAVE:=2;             {至少2个波}
+
+{==================== 起爆日识别 ====================}
+RET:=(C-REF(C,1))/REF(C,1);
+V_MA20:=REF(MA(V,20),1);
+IS_LAUNCH:=RET>=LAUNCH_RET AND V>V_MA20*VOL_MUL AND V_MA20>0;
+
+{最近60日起爆次数}
+WAVE_COUNT:=COUNT(IS_LAUNCH,LOOKBACK);
+
+{==================== 利通特征：W型走势（宽松HH条件） ====================}
+{允许波峰不严格递增，可以有1次例外}
+HH20:=HHV(H,20);
+HH40:=HHV(H,40);
+HH60:=HHV(H,60);
+
+{W型特征：中间有回调但整体向上}
+W_PATTERN:=HH60>HH40*0.95 AND HH40>HH20*0.90;
+
+{==================== 利通特征：价格位置灵活 ====================}
+MA20:=MA(C,20);
+MA60:=MA(C,60);
+{价格在MA20附近即可，不要求严格在上方}
+PRICE_POS:=C>MA20*0.90 AND C<MA20*1.20;
+
+{==================== 利通特征：成交量温和放大 ====================}
+VOL5:=MA(V,5);
+VOL20:=MA(V,20);
+{成交量温和活跃即可}
+VOL_OK:=VOL5>VOL20*0.9;
+
+{==================== 利通特征：振幅适中 ====================}
+{最近20日振幅}
+AMP20:=(HHV(H,20)-LLV(L,20))/LLV(L,20);
+{振幅在10%-40%之间}
+AMP_OK:=AMP20>0.10 AND AMP20<0.40;
+
+{==================== 利通特征：回调幅度 ====================}
+{允许较深回调（Pierce宽松）}
+LL20:=LLV(L,20);
+PULLBACK:=(HH20-LL20)/HH20;
+{回调10%-25%都可接受}
+PULLBACK_OK:=PULLBACK>0.10 AND PULLBACK<0.25;
+
+{==================== 利通特征：趋势向上 ====================}
+{MA5>MA20表示短期趋势向上}
+MA5:=MA(C,5);
+TREND_UP:=MA5>MA20;
+
+{==================== 综合条件 ====================}
+{基础条件}
+BASE:=WAVE_COUNT>=MIN_WAVE AND NOT(NAMELIKE('ST') OR NAMELIKE('*ST'));
+
+{利通宽松条件}
+LITONG_COND:=BASE 
+    AND PRICE_POS 
+    AND VOL_OK 
+    AND AMP_OK 
+    AND PULLBACK_OK;
+
+{==================== 买入信号 ====================}
+{今日是起爆日 且 满足利通形态}
+BUY_TODAY:=IS_LAUNCH AND LITONG_COND;
+
+{==================== 输出显示 ====================}
+{主信号线}
+XG:BUY_TODAY,COLORGREEN,LINETHICK3;
+
+{买入点标注}
+STICKLINE(BUY_TODAY,C*0.93,C*1.07,8,0),COLORGREEN;
+DRAWTEXT(BUY_TODAY,L*0.92,'★★利通买点★★'),COLORGREEN;
+DRAWTEXT(BUY_TODAY,L*0.88,'T+1开盘买入'),COLORYELLOW;
+
+{形态特征标注}
+DRAWTEXT(W_PATTERN,H*1.02,'W型'),COLORCYAN;
+DRAWTEXT(IS_LAUNCH,L*0.96,'起爆'),COLORMAGENTA;
+DRAWTEXT(TREND_UP,L*0.94,'趋势↑'),COLORRED;
+
+{辅助信息}
+DRAWTEXT(PULLBACK_OK,H*1.04,'回调OK'),COLORWHITE;
+
+{==================== 选股条件 ====================}
+BUY_TODAY;

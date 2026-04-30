@@ -1,0 +1,107 @@
+{通达信选股公式 - 澜起科技形态策略}
+{模板股票: 688008 澜起科技}
+{起爆日: 2025-08-22}
+{模式: Strict - 严格模式}
+{特征: 科创板芯片龙头，价格高位运行，技术形态完美}
+
+{==================== 核心参数 ====================}
+LAUNCH_RET:=0.05;        {起爆涨幅≥5%}
+VOL_MUL:=2.0;            {成交量≥20日均量2倍}
+LOOKBACK:=60;            {回溯60日}
+MIN_WAVE:=2;             {至少2个波}
+
+{==================== 起爆日识别 ====================}
+RET:=(C-REF(C,1))/REF(C,1);
+V_MA20:=REF(MA(V,20),1);
+IS_LAUNCH:=RET>=LAUNCH_RET AND V>V_MA20*VOL_MUL AND V_MA20>0;
+
+{最近60日起爆次数}
+WAVE_COUNT:=COUNT(IS_LAUNCH,LOOKBACK);
+
+{==================== 澜起特征：龙头气质 ====================}
+{波峰严格递增且幅度大}
+HH10:=HHV(H,10);
+HH20:=HHV(H,20);
+HH40:=HHV(H,40);
+STRONG_PEAK:=HH10>HH20*1.00 AND HH20>HH40*1.00;
+
+{==================== 澜起特征：价格高位 ====================}
+{价格在80元以上（科创板高价股）}
+HIGH_PRICE:=C>=80;
+
+{或者价格在60日均线上方30%以上}
+MA60:=MA(C,60);
+ABOVE_MA60:=C>MA60*1.30;
+
+PRICE_HIGH:=HIGH_PRICE OR ABOVE_MA60;
+
+{==================== 澜起特征：成交量持续活跃 ====================}
+VOL5:=MA(V,5);
+VOL10:=MA(V,10);
+VOL20:=MA(V,20);
+{成交量持续放大}
+VOL_STRONG:=VOL5>VOL10*1.1 AND VOL10>VOL20*1.05;
+
+{==================== 澜起特征：反喇叭口收敛 ====================}
+AMP27:=(HHV(H,27)-LLV(L,27))/((HHV(H,27)+LLV(L,27))/2);
+AMP18:=(HHV(H,18)-LLV(L,18))/((HHV(H,18)+LLV(L,18))/2);
+AMP9:=(HHV(H,9)-LLV(L,9))/((HHV(H,9)+LLV(L,9))/2);
+CONVERGE:=AMP27>AMP18*1.15 AND AMP18>AMP9*1.15;
+
+{==================== 澜起特征：突破新高 ====================}
+{创60日新高}
+NEW_HIGH_60:=H>=HHV(H,60);
+
+{==================== 澜起特征：均线多头排列 ====================}
+MA5:=MA(C,5);
+MA10:=MA(C,10);
+MA20:=MA(C,20);
+BULL_ALIGN:=MA5>MA10 AND MA10>MA20 AND MA20>MA60;
+
+{==================== 澜起特征：强势特征 ====================}
+{收盘价接近最高价}
+CLOSE_STRONG:=C>H*0.96;
+
+{涨幅在5%-9%之间（不追涨停）}
+RET_MODERATE:=RET>=0.05 AND RET<0.095;
+
+{==================== 澜起特征：技术形态完美 ====================}
+{MACD金叉}
+DIF:=EMA(CLOSE,12)-EMA(CLOSE,26);
+DEA:=EMA(DIF,9);
+MACD_GOLD:=DIF>DEA AND REF(DIF,1)<=REF(DEA,1);
+
+{==================== 综合条件 ====================}
+{基础条件}
+BASE:=WAVE_COUNT>=MIN_WAVE AND NOT(NAMELIKE('ST') OR NAMELIKE('*ST'));
+
+{澜起严格条件}
+LANQI_COND:=BASE 
+    AND STRONG_PEAK 
+    AND PRICE_HIGH 
+    AND VOL_STRONG 
+    AND CONVERGE 
+    AND BULL_ALIGN 
+    AND CLOSE_STRONG;
+
+{==================== 买入信号 ====================}
+{今日是起爆日 且 满足澜起形态}
+BUY_TODAY:=IS_LAUNCH AND LANQI_COND;
+
+{==================== 输出显示 ====================}
+{主信号线}
+XG:BUY_TODAY,COLORLIBLUE,LINETHICK3;
+
+{买入点标注}
+STICKLINE(BUY_TODAY,C*0.93,C*1.07,8,0),COLORLIBLUE;
+DRAWTEXT(BUY_TODAY,L*0.92,'★★澜起买点★★'),COLORLIBLUE;
+DRAWTEXT(BUY_TODAY,L*0.88,'T+1开盘买入'),COLORYELLOW;
+
+{形态特征标注}
+DRAWTEXT(CONVERGE,H*1.02,'收敛'),COLORCYAN;
+DRAWTEXT(NEW_HIGH_60,H*1.04,'新高'),COLORRED;
+DRAWTEXT(IS_LAUNCH,L*0.96,'起爆'),COLORMAGENTA;
+DRAWTEXT(BULL_ALIGN,L*0.94,'多头'),COLORGREEN;
+
+{==================== 选股条件 ====================}
+BUY_TODAY;

@@ -1,3 +1,32 @@
-partnerships: {}
-companies: {}
-persons: {}
+partnerships:
+  无锡核芯听涛科技合伙企业(普通合伙):
+    identity: 有限合伙企业(资本运作SPV/持股载体)
+    business: <cite index="1-1">无锡核芯听涛与夏继发、夏泽民签署股份转让协议，将持有长龄液压29.99%的股份，交易价款12.38亿元</cite>。<cite
+      index="1-2">执行事务合伙人为胡康桥，其为核芯听涛的实际控制人</cite>。
+    key_persons:
+    - 胡康桥
+    - 许兰涛
+    - 核芯互联
+    auto_added: true
+    added_ts: 1777545164.5754821
+companies:
+  清华大学电子工程系:
+    identity: budget_skipped
+    business: ''
+    key_persons: []
+    auto_added: true
+    added_ts: 1777545164.5755131
+persons:
+  胡康桥:
+    identity: ''
+    business: ''
+    key_persons: []
+    auto_added: true
+    added_ts: 1777545164.575507
+  核芯互联:
+    identity: 数模混合信号链芯片设计公司
+    business: <cite index="2-1">成立于2018年，专注于数模混合信号链芯片和高速互连芯片设计，在北京、上海、成都设有研发中心，是国家高新技术企业、专精特新"重点小巨人"企业，推出上千个型号的芯片产品，应用于服务器、数据中心、光模块、电力、轨交、智能制造等领域</cite></business>
+    key_persons:
+    - 胡康桥
+    auto_added: true
+    added_ts: 1777545164.5755105

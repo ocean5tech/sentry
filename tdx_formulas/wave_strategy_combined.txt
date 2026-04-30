@@ -1,0 +1,127 @@
+{通达信选股公式 - Wave形态策略（6合1版本）}
+{基于宏景科技、利通电子、香农芯创、福晶科技、云南锗业、澜起科技的形态特征}
+{作者: Bob Shell AI Assistant}
+{日期: 2026-04-29}
+
+{==================== 参数设置 ====================}
+{Launch条件}
+LAUNCH_RET:=0.05;        {起爆日涨幅阈值 5%}
+LAUNCH_VOL_MUL:=2.0;     {起爆日成交量倍数 2倍}
+VOL_WIN:=20;             {成交量均线窗口}
+PULLBACK_WIN:=15;        {回调窗口}
+LOOKBACK:=60;            {回溯窗口}
+MIN_WAVE:=2;             {最少波数}
+
+{==================== 基础指标计算 ====================}
+{涨跌幅}
+RET:=(C-REF(C,1))/REF(C,1);
+
+{成交量均线（前一日）}
+V_MA:=REF(MA(V,VOL_WIN),1);
+
+{起爆日判断：涨幅≥5% 且 成交量≥20日均量的2倍}
+IS_LAUNCH:=RET>=LAUNCH_RET AND V>V_MA*LAUNCH_VOL_MUL AND V_MA>0;
+
+{==================== Wave形态识别 ====================}
+{最近60日内的起爆日计数}
+LAUNCH_COUNT:=COUNT(IS_LAUNCH,LOOKBACK);
+
+{最近的起爆日距离（天数）}
+LAST_LAUNCH_DAYS:=BARSLAST(IS_LAUNCH);
+
+{前一个起爆日距离}
+PREV_LAUNCH_DAYS:=BARSLAST(REF(IS_LAUNCH,LAST_LAUNCH_DAYS+1));
+
+{==================== 价格形态特征 ====================}
+{最近20日最高价和最低价}
+HH20:=HHV(H,20);
+LL20:=LLV(L,20);
+
+{价格波动幅度（振幅）}
+AMP20:=(HH20-LL20)/LL20;
+
+{收盘价相对20日均价的位置}
+MA20:=MA(C,20);
+PRICE_POS:=C/MA20;
+
+{==================== 成交量特征 ====================}
+{成交量放大倍数}
+VOL_RATIO:=V/V_MA;
+
+{最近5日成交量均值相对20日均值}
+VOL5_VS_VOL20:=MA(V,5)/MA(V,20);
+
+{==================== 反喇叭口形态（收敛） ====================}
+{最近9日、18日、27日的振幅对比}
+AMP_9:=(HHV(H,9)-LLV(L,9))/((HHV(H,9)+LLV(L,9))/2);
+AMP_18:=(HHV(H,18)-LLV(L,18))/((HHV(H,18)+LLV(L,18))/2);
+AMP_27:=(HHV(H,27)-LLV(L,27))/((HHV(H,27)+LLV(L,27))/2);
+
+{振幅收敛（反喇叭口）}
+TRIANGLE:=AMP_27>AMP_18 AND AMP_18>AMP_9;
+
+{==================== 尖头特征 ====================}
+{起爆后快速回落（5日内收盘价低于起爆日收盘价）}
+SPIKE_SIGNAL:=REF(IS_LAUNCH,5) AND C<REF(C,5);
+
+{==================== 价格区间偏好 ====================}
+{价格在60-100元区间（中高价股）}
+PRICE_ZONE:=C>=60 AND C<=100;
+
+{==================== 大盘趋势配合 ====================}
+{大盘20日涨跌幅（需要自行计算或使用指数数据）}
+{这里简化为：大盘MA5>MA20表示上升趋势}
+INDEX_TREND:=1; {通达信中需要引用指数数据，这里简化处理}
+
+{==================== 综合信号 ====================}
+{基础条件：至少2个起爆日}
+BASE_COND:=LAUNCH_COUNT>=MIN_WAVE;
+
+{Strict模式条件（宏景、香农、福晶、澜起）}
+{要求：价格收敛、成交量配合、价格位置合理}
+STRICT_COND:=BASE_COND 
+    AND TRIANGLE 
+    AND VOL5_VS_VOL20>1.0 
+    AND PRICE_POS>0.95 
+    AND PRICE_POS<1.15
+    AND AMP20>0.15;
+
+{Loose模式条件（利通、云南锗业）}
+{要求相对宽松，允许W型走势}
+LOOSE_COND:=BASE_COND 
+    AND VOL5_VS_VOL20>0.9 
+    AND PRICE_POS>0.90 
+    AND AMP20>0.10;
+
+{==================== 买入信号 ====================}
+{今日是起爆日 且 满足形态条件}
+BUY_SIGNAL_STRICT:=IS_LAUNCH AND STRICT_COND;
+BUY_SIGNAL_LOOSE:=IS_LAUNCH AND LOOSE_COND;
+
+{综合买入信号}
+BUY_SIGNAL:=BUY_SIGNAL_STRICT OR BUY_SIGNAL_LOOSE;
+
+{==================== 输出显示 ====================}
+{买入信号}
+XG:BUY_SIGNAL,COLORRED,LINETHICK2;
+
+{辅助线}
+STICKLINE(BUY_SIGNAL,C*0.95,C*1.05,6,0),COLORRED;
+DRAWTEXT(BUY_SIGNAL,L*0.95,'★买入点'),COLORRED;
+
+{形态类型标注}
+DRAWTEXT(BUY_SIGNAL_STRICT,L*0.92,'严格模式'),COLORYELLOW;
+DRAWTEXT(BUY_SIGNAL_LOOSE,L*0.92,'宽松模式'),COLORGREEN;
+
+{起爆日标记}
+DRAWICON(IS_LAUNCH,L*0.98,1);
+
+{成交量放大标记}
+DRAWTEXT(VOL_RATIO>2,L*0.96,'量'),COLORMAGENTA;
+
+{价格收敛标记}
+DRAWTEXT(TRIANGLE,H*1.02,'收敛'),COLORCYAN;
+
+{==================== 选股条件 ====================}
+{最终选股：今日出现买入信号}
+BUY_SIGNAL;

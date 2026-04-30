@@ -1,0 +1,94 @@
+{通达信选股公式 - 云南锗业形态策略}
+{模板股票: 002428 云南锗业}
+{起爆日: 2026-02-27}
+{模式: Loose - 宽松模式}
+{特征: 稀有金属板块，允许W型走势，价格波动较大}
+
+{==================== 核心参数 ====================}
+LAUNCH_RET:=0.05;        {起爆涨幅≥5%}
+VOL_MUL:=2.0;            {成交量≥20日均量2倍}
+LOOKBACK:=60;            {回溯60日}
+MIN_WAVE:=2;             {至少2个波}
+
+{==================== 起爆日识别 ====================}
+RET:=(C-REF(C,1))/REF(C,1);
+V_MA20:=REF(MA(V,20),1);
+IS_LAUNCH:=RET>=LAUNCH_RET AND V>V_MA20*VOL_MUL AND V_MA20>0;
+
+{最近60日起爆次数}
+WAVE_COUNT:=COUNT(IS_LAUNCH,LOOKBACK);
+
+{==================== 云南锗业特征：W型双底 ====================}
+{允许波峰不严格递增}
+HH20:=HHV(H,20);
+HH40:=HHV(H,40);
+{W型：前后两个高点接近}
+W_SHAPE:=HH20>HH40*0.90 AND HH20<HH40*1.15;
+
+{==================== 云南锗业特征：深度回调 ====================}
+LL20:=LLV(L,20);
+{允许较深回调（25%-40%）}
+DEEP_PULLBACK:=(HH40-LL20)/HH40;
+PULLBACK_OK:=DEEP_PULLBACK>0.15 AND DEEP_PULLBACK<0.40;
+
+{==================== 云南锗业特征：价格位置灵活 ====================}
+MA20:=MA(C,20);
+MA60:=MA(C,60);
+{价格可以在MA20下方，但不能太远}
+PRICE_FLEX:=C>MA20*0.85 AND C<MA20*1.25;
+
+{==================== 云南锗业特征：成交量波动 ====================}
+VOL5:=MA(V,5);
+VOL20:=MA(V,20);
+{成交量有波动即可}
+VOL_WAVE:=VOL5>VOL20*0.8;
+
+{==================== 云南锗业特征：振幅较大 ====================}
+AMP20:=(HHV(H,20)-LLV(L,20))/LLV(L,20);
+AMP40:=(HHV(H,40)-LLV(L,40))/LLV(L,40);
+{振幅15%-50%}
+AMP_LARGE:=AMP20>0.15 AND AMP40<0.50;
+
+{==================== 云南锗业特征：反弹力度 ====================}
+{从低点反弹幅度}
+REBOUND:=(C-LL20)/LL20;
+REBOUND_OK:=REBOUND>0.10;
+
+{==================== 云南锗业特征：板块联动 ====================}
+{稀有金属板块特征：价格波动大但有周期性}
+{这里简化为振幅周期性}
+AMP_CYCLE:=AMP20>0.15 AND AMP40>0.25;
+
+{==================== 综合条件 ====================}
+{基础条件}
+BASE:=WAVE_COUNT>=MIN_WAVE AND NOT(NAMELIKE('ST') OR NAMELIKE('*ST'));
+
+{云南锗业宽松条件}
+YUNNANGE_COND:=BASE 
+    AND PRICE_FLEX 
+    AND VOL_WAVE 
+    AND PULLBACK_OK 
+    AND REBOUND_OK 
+    AND AMP_LARGE;
+
+{==================== 买入信号 ====================}
+{今日是起爆日 且 满足云南锗业形态}
+BUY_TODAY:=IS_LAUNCH AND YUNNANGE_COND;
+
+{==================== 输出显示 ====================}
+{主信号线}
+XG:BUY_TODAY,COLORCYAN,LINETHICK3;
+
+{买入点标注}
+STICKLINE(BUY_TODAY,C*0.93,C*1.07,8,0),COLORCYAN;
+DRAWTEXT(BUY_TODAY,L*0.92,'★★锗业买点★★'),COLORCYAN;
+DRAWTEXT(BUY_TODAY,L*0.88,'T+1开盘买入'),COLORYELLOW;
+
+{形态特征标注}
+DRAWTEXT(W_SHAPE,H*1.02,'W型'),COLORMAGENTA;
+DRAWTEXT(IS_LAUNCH,L*0.96,'起爆'),COLORRED;
+DRAWTEXT(REBOUND_OK,L*0.94,'反弹'),COLORGREEN;
+DRAWTEXT(AMP_CYCLE,H*1.04,'周期'),COLORWHITE;
+
+{==================== 选股条件 ====================}
+BUY_TODAY;

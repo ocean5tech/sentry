@@ -1,0 +1,21 @@
+{
+  "webhook_url": "YOUR_WECOM_WEBHOOK_URL",
+  "scan_time": "14:30",
+  "strategy": {
+    "name": "V3策略（MA5±1%）",
+    "ma_period": 5,
+    "threshold": 0.01,
+    "description": "回调到MA5附近的缩量阴线策略"
+  },
+  "filters": {
+    "market_trend": true,
+    "stock_trend": true,
+    "volume_shrink": true,
+    "previous_active": true,
+    "ma_pullback": true
+  },
+  "notification": {
+    "enabled": true,
+    "test_mode": false
+  }
+}

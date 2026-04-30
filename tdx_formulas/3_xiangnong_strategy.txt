@@ -1,0 +1,90 @@
+{通达信选股公式 - 香农芯创形态策略}
+{模板股票: 300475 香农芯创}
+{起爆日: 2025-09-08}
+{模式: Strict - 严格模式}
+{特征: 单次强势起爆，芯片半导体板块，价格收敛明显}
+
+{==================== 核心参数 ====================}
+LAUNCH_RET:=0.05;        {起爆涨幅≥5%}
+VOL_MUL:=2.0;            {成交量≥20日均量2倍}
+LOOKBACK:=60;            {回溯60日}
+MIN_WAVE:=2;             {至少2个波}
+
+{==================== 起爆日识别 ====================}
+RET:=(C-REF(C,1))/REF(C,1);
+V_MA20:=REF(MA(V,20),1);
+IS_LAUNCH:=RET>=LAUNCH_RET AND V>V_MA20*VOL_MUL AND V_MA20>0;
+
+{最近60日起爆次数}
+WAVE_COUNT:=COUNT(IS_LAUNCH,LOOKBACK);
+
+{==================== 香农特征：强势收敛 ====================}
+{振幅快速收敛}
+AMP27:=(HHV(H,27)-LLV(L,27))/((HHV(H,27)+LLV(L,27))/2);
+AMP18:=(HHV(H,18)-LLV(L,18))/((HHV(H,18)+LLV(L,18))/2);
+AMP9:=(HHV(H,9)-LLV(L,9))/((HHV(H,9)+LLV(L,9))/2);
+
+{强收敛：振幅递减超过20%}
+STRONG_CONVERGE:=AMP27>AMP18*1.2 AND AMP18>AMP9*1.2;
+
+{==================== 香农特征：波峰严格递增 ====================}
+HH10:=HHV(H,10);
+HH20:=HHV(H,20);
+HH30:=HHV(H,30);
+{每个波峰都创新高}
+PEAK_UP:=HH10>HH20*0.98 AND HH20>HH30*0.95;
+
+{==================== 香农特征：价格位置 ====================}
+MA20:=MA(C,20);
+MA60:=MA(C,60);
+{价格在MA20上方且趋势向上}
+PRICE_STRONG:=C>MA20*1.00 AND MA20>MA60;
+
+{==================== 香农特征：成交量持续放大 ====================}
+VOL5:=MA(V,5);
+VOL10:=MA(V,10);
+VOL20:=MA(V,20);
+{成交量逐步放大}
+VOL_EXPAND:=VOL5>VOL10 AND VOL10>VOL20;
+
+{==================== 香农特征：突破形态 ====================}
+{突破前期高点}
+BREAKOUT:=C>REF(HHV(H,30),1)*0.98;
+
+{==================== 香农特征：振幅收缩率 ====================}
+{振幅收缩超过30%}
+SHRINK_RATE:=(AMP27-AMP9)/AMP27;
+SHRINK_OK:=SHRINK_RATE>0.30;
+
+{==================== 综合条件 ====================}
+{基础条件}
+BASE:=WAVE_COUNT>=MIN_WAVE AND NOT(NAMELIKE('ST') OR NAMELIKE('*ST'));
+
+{香农严格条件}
+XIANGNONG_COND:=BASE 
+    AND STRONG_CONVERGE 
+    AND PRICE_STRONG 
+    AND VOL_EXPAND 
+    AND SHRINK_OK;
+
+{==================== 买入信号 ====================}
+{今日是起爆日 且 满足香农形态}
+BUY_TODAY:=IS_LAUNCH AND XIANGNONG_COND;
+
+{==================== 输出显示 ====================}
+{主信号线}
+XG:BUY_TODAY,COLORMAGENTA,LINETHICK3;
+
+{买入点标注}
+STICKLINE(BUY_TODAY,C*0.93,C*1.07,8,0),COLORMAGENTA;
+DRAWTEXT(BUY_TODAY,L*0.92,'★★香农买点★★'),COLORMAGENTA;
+DRAWTEXT(BUY_TODAY,L*0.88,'T+1开盘买入'),COLORYELLOW;
+
+{形态特征标注}
+DRAWTEXT(STRONG_CONVERGE,H*1.02,'强收敛'),COLORCYAN;
+DRAWTEXT(IS_LAUNCH,L*0.96,'起爆'),COLORRED;
+DRAWTEXT(VOL_EXPAND,L*0.94,'量扩'),COLORGREEN;
+DRAWTEXT(BREAKOUT,H*1.04,'突破'),COLORWHITE;
+
+{==================== 选股条件 ====================}
+BUY_TODAY;
