@@ -23,4 +23,8 @@ def get_llm(providers_cfg: dict, override: str | None = None):
     if active not in _REGISTRY:
         raise ValueError(f"unknown llm provider: {active}. valid: {list(_REGISTRY)}")
     sub_cfg = providers_cfg.get(active, {})
-    return _REGISTRY[active](sub_cfg)
+    cls = _REGISTRY[active]
+    # OpenAICompatLLM 接受 provider_name 参数，让实例 name 反映实际配置
+    if cls is OpenAICompatLLM:
+        return cls(sub_cfg, provider_name=active)
+    return cls(sub_cfg)

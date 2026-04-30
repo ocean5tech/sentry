@@ -10,7 +10,8 @@ from .llm_base import LLMResponse
 class OpenAICompatLLM:
     name = "openai_compat"
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, provider_name: str = "openai_compat"):
+        self.name = provider_name   # 使用实际配置的 provider 名 (deepseek / openai_compat)
         self.cfg = cfg
         api_key = os.environ.get(cfg.get("api_key_env", "OPENAI_API_KEY"))
         if not api_key:
