@@ -114,96 +114,118 @@ def format_chain(chain: dict, prefix: str = "  ") -> list[str]:
     return lines
 
 
+TPL_NAMES = {
+    "hongjing":  "宏景科技型",
+    "litong":    "利通电子型",
+    "xiangnong": "香农芯创型",
+    "fujing":    "福晶科技型",
+    "yunnange":  "云南锗业型",
+    "lanqi":     "澜起科技型",
+}
+
+
 def build_msg(rec: dict, tpl_info: dict, fin_data: dict | None,
               entry_price: float, disclaimer: str) -> str:
-    """每股一条 markdown 消息."""
-    code = rec["code"]
-    name = rec["name"]
-    sig_date = rec["sig_date"]
-    dist = rec["template_dist"]
-    stars = "⭐" * rec.get("_stars", 1)
-    tpl = rec["template"]
-    win80 = tpl_info["win80"]
-    avg_ret = tpl_info["avg_ret80"]
-    target = entry_price * (1 + avg_ret)
-    stop = entry_price * 0.93
-    hold = "80d" if win80 >= 0.45 else "20d"
+    """每股一条 markdown 消息: q-seed 基础 + q-fin 推理链(如有)."""
+    code      = rec["code"]
+    name      = rec["name"]
+    sig_date  = rec["sig_date"]
+    dist      = rec["template_dist"]
+    tpl       = rec["template"]
+    etype     = rec.get("explosion_type", "首次")
+    win80     = tpl_info["win80"]
+    avg_ret   = tpl_info["avg_ret80"]
+    match_pct = max(0, min(100, round(100 - dist * 4)))
+    target    = entry_price * (1 + avg_ret)
+    stop      = entry_price * 0.93
+    hold      = "80天" if win80 >= 0.45 else "20天"
+    tpl_name  = TPL_NAMES.get(tpl, tpl)
+    etype_mark = "★★ 再次起爆" if etype == "再次" else "首次起爆"
 
-    msg = []
-    msg.append(f"# 📈 {name} ({code}) {stars}")
-    msg.append("")
-    explosion_type = rec.get("explosion_type", "首次")
-    explosion_mark = "★★ 再次起爆 (80d胜率87%)" if explosion_type == "再次" else "首次起爆 (80d胜率56%)"
-    msg.append(f"**模板**: {tpl} (历史 80d 胜率 {win80*100:.0f}%, 平均 +{avg_ret*100:.0f}%)")
-    msg.append(f"**起爆**: {sig_date} [{explosion_mark}] / 形态距离 {dist:.2f}")
-    msg.append("")
-    msg.append(f"💰 **入场参考价**: {entry_price:.2f} (T+1 收盘)")
-    msg.append(f"🎯 **目标价**: {target:.2f} (+{avg_ret*100:.0f}%)")
-    msg.append(f"🛑 **止损价**: {stop:.2f} (-7%)")
-    msg.append(f"⏱ **建议持仓**: {hold}")
+    has_fin = bool(fin_data)
+    attention = "高关注" if (has_fin and (fin_data.get("verdict") or {}).get("rating", 0) >= 3) \
+                else "中等关注" if has_fin else "形态信号"
+    scan_date = (fin_data or {}).get("scan_date") or rec.get("as_of_date", "")
 
-    # q-fin 深度调研
+    m = []
+    m.append(f"## 📊 截至 {scan_date} 收盘 · 选股信号")
+    m.append("")
+    m.append(f"**{name} ({code})** — {attention}")
+    m.append("")
+
+    # ── q-seed 部分 ──────────────────────────────
+    m.append("【形态匹配 (q-seed)】")
+    m.append(f"- 模板: **{tpl_name}** 匹配度 **{match_pct}%** (dist={dist:.2f})")
+    m.append(f"- 起爆日: {sig_date}  [{etype_mark}]")
+    m.append(f"- 历史胜率: 80天 **{win80*100:.0f}%**, 均收益 +{avg_ret*100:.0f}%")
+    m.append(f"- T+1 入场参考: **{entry_price:.2f}** 元")
+    m.append(f"- 止损: {stop:.2f} (-7%)  目标: {target:.2f} (+{avg_ret*100:.0f}%)  持仓: {hold}")
+
+    # ── q-fin 部分 (如有) ──────────────────────────
     if fin_data:
-        v = fin_data.get("verdict") or {}
-        er = fin_data.get("entity_research") or {}
+        v    = fin_data.get("verdict") or {}
+        er   = fin_data.get("entity_research") or {}
         meta = fin_data.get("meta") or {}
+        l1   = fin_data.get("layer1_triggers") or {}
 
-        # --- debug: LLM 模型 + 搜索策略 ---
-        llm_model  = v.get("verdict_model") or (meta.get("providers") or {}).get("llm", "?")
-        llm_prov   = v.get("verdict_provider") or er.get("llm_provider", "?")
-        srch_prov  = er.get("search_provider", "?")
-        msg.append("")
-        msg.append(f"🔧 **[debug]** LLM: `{llm_prov}/{llm_model}` | 搜索: `{srch_prov}`")
+        llm_prov  = v.get("verdict_provider") or meta.get("providers", {}).get("llm", "?")
+        llm_model = v.get("verdict_model") or "?"
+        srch_prov = meta.get("providers", {}).get("search", "?")
 
-        if v and v.get("rating"):
-            msg.append("")
-            msg.append(f"## 🌟 q-fin 综合评级: {v.get('stars', '⭐'*v.get('rating',1))}")
-            msg.append(f"**结论**: {v.get('one_liner', '')}")
-            if v.get("key_risks"):
-                msg.append("")
-                msg.append("**风险**:")
-                for k in v["key_risks"][:3]:
-                    msg.append(f"- {k[:80]}")
+        m.append("")
+        m.append("【深度调研 (q-fin)】")
+        m.append(f"🔧 LLM: `{llm_prov}/{llm_model}` | 搜索: `{srch_prov}`")
 
-        # --- 推理链 ---
+        if v.get("rating"):
+            rating_stars = "⭐" * v["rating"]
+            m.append(f"评级: {rating_stars} ({v['rating']}/5)  **{v.get('one_liner','')}**")
+
+        # Layer 1 事件
+        events = l1.get("matched_events") or []
+        if events:
+            m.append("")
+            m.append("**触发事件:**")
+            for e in events[:3]:
+                m.append(f"- {e.get('keyword','')} ({e.get('ann_date','')})")
+
+        # 推理链
         steps = er.get("reasoning_steps") or []
         if steps:
-            msg.append("")
-            msg.append("## 🔍 推理链")
+            m.append("")
+            m.append("**🔍 推理链:**")
             for s in steps:
-                depth_indent = "  " * s.get("depth", 0)
-                entity = s.get("entity", "")
-                search_mark = "🔎" if s.get("search_used") else "💾"
-                snippets = s.get("search_snippets") or []
-                conclusion = s.get("conclusion", "")
-                biz = s.get("business_summary", "")
-                msg.append(f"{depth_indent}{search_mark} **{entity}**")
-                for sn in snippets[:2]:
-                    msg.append(f"{depth_indent}  › {sn}")
-                if conclusion:
-                    msg.append(f"{depth_indent}  → {conclusion}")
-                if biz:
-                    msg.append(f"{depth_indent}  __{biz[:70]}__")
+                indent = "  " * s.get("depth", 0)
+                icon   = "🔎" if s.get("search_used") else "💾"
+                m.append(f"{indent}{icon} **{s['entity']}**")
+                for sn in (s.get("search_snippets") or [])[:2]:
+                    m.append(f"{indent}  › {sn}")
+                if s.get("conclusion"):
+                    m.append(f"{indent}  → {s['conclusion'][:70]}")
+                if s.get("business_summary"):
+                    m.append(f"{indent}  _{s['business_summary'][:80]}_")
 
-        if er and er.get("chain"):
-            msg.append("")
-            msg.append(f"## 🕸 实体树 (深度{er.get('max_depth_used',1)}层 ${er.get('budget_used_usd',0):.3f})")
-            chain_lines = format_chain(er["chain"])
-            for cl in chain_lines[:20]:
-                msg.append(cl)
-        elif fin_data.get("layer1_triggers"):
-            l1 = fin_data["layer1_triggers"]
-            ev = l1.get("matched_events", []) or []
-            if ev:
-                msg.append("")
-                msg.append("**Layer 1 触发事件**:")
-                for e in ev[:3]:
-                    msg.append(f"- {e.get('keyword', '')} ({e.get('ann_date','')})")
+        # 实体树
+        if er.get("chain"):
+            m.append("")
+            m.append(f"**实体树** (深度{er.get('max_depth_used',1)}层 ${er.get('budget_used_usd',0):.3f}):")
+            for cl in format_chain(er["chain"])[:15]:
+                m.append(cl)
 
-    msg.append("")
-    msg.append("---")
-    msg.append(disclaimer.strip())
-    return "\n".join(msg)
+        # 风险
+        risks = v.get("key_risks") or []
+        if risks:
+            m.append("")
+            m.append("**风险:**")
+            for rk in risks[:3]:
+                m.append(f"- {rk[:85]}")
+    else:
+        m.append("")
+        m.append("_（本股未运行 q-fin 深度调研）_")
+
+    m.append("")
+    m.append("---")
+    m.append(disclaimer.strip())
+    return "\n".join(m)
 
 
 def push_message(qpush_cmd: str, code: str, name: str, msg_md: str, tag: str = "今日选股"):
