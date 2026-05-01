@@ -151,11 +151,105 @@ def _format_search_evidence(results) -> str:
     if not results:
         return ""
     lines = []
-    for i, r in enumerate(results[:3], 1):
+    for i, r in enumerate(results[:8], 1):
         title = (getattr(r, "title", "") or "").strip()[:80]
-        snippet = (getattr(r, "snippet", "") or "").strip()[:200]
+        snippet = (getattr(r, "snippet", "") or "").strip()[:300]
         lines.append(f"[{i}] {title}\n    {snippet}")
     return "\n".join(lines)
+
+
+# ── M&A 专项搜索关键词 ─────────────────────────────────────────────
+_MA_ANN_KEYWORDS = ["重大资产重组", "收购报告书", "要约收购", "资产重组",
+                    "股权收购", "并购", "资产注入", "重组预案", "借壳重组"]
+
+
+def search_ma_context(
+    code: str,
+    name: str,
+    announcements: dict,
+    search,
+    llm,
+    budget,
+) -> dict | None:
+    """
+    针对重组/收购类公告做专项双向搜索，区分两种情况：
+      A. 公司在收购别人（重大资产重组、资产注入）→ 找目标公司名称和业务
+      B. 公司被收购（要约收购、控制权变更）→ 找收购方背景和意图
+
+    返回 dict 或 None（无重组信号 / 搜索无结果）
+    """
+    if not search:
+        return None
+
+    # 检测是否有重组/收购类公告
+    ann = announcements or {}
+    by_cat = ann.get("by_category", {}) or {}
+    key_titles = ann.get("key_titles", []) or []
+
+    # key_titles 可能是 str 或 dict（含 title 字段）
+    title_texts = [
+        t.get("title", "") if isinstance(t, dict) else str(t)
+        for t in key_titles
+    ]
+
+    has_ma = (
+        any(k in by_cat for k in _MA_ANN_KEYWORDS)
+        or any(kw in text for text in title_texts for kw in ["重组", "收购", "并购", "要约", "注入"])
+    )
+    if not has_ma:
+        return None
+
+    # 双向搜索：覆盖"买别人"和"被买"两种情况
+    queries = [
+        f"{name} {code} 收购标的 资产注入 重组方向",   # A: 找它在买什么
+        f"{name} {code} 入主方 收购方 要约 受让方",     # B: 找谁在买它
+    ]
+
+    all_results = []
+    for q in queries:
+        try:
+            results = search.query(q, max_results=5)
+            all_results.extend(results)
+        except Exception:
+            pass
+
+    if not all_results:
+        return None
+
+    evidence = _format_search_evidence(all_results)
+
+    prompt = (
+        f"以下是关于A股上市公司「{name}({code})」重组/收购的搜索结果。\n\n"
+        f"{evidence}\n\n"
+        "请提取关键信息，输出严格JSON（信息不足的字段填null）：\n"
+        "  scenario: '买方'（公司在收购别人）/ '被买'（公司被收购）/ '双向'/ '不明'\n"
+        "  target_company: 被收购的目标公司名称（公司作为买方时填写）\n"
+        "  target_business: 目标公司主营业务（≤50字）\n"
+        "  acquirer: 收购上市公司的一方名称（公司被收购时填写）\n"
+        "  acquirer_background: 收购方背景主业（≤60字）\n"
+        "  deal_structure: 交易方式（现金收购/股份置换/要约收购等，≤30字）\n"
+        "  deal_direction: 重组后公司转型或发展方向（≤40字）\n"
+        "  confidence: 高/中/低\n"
+        "只输出JSON，不要解释。"
+    )
+
+    est = llm.estimate_cost(len(evidence) // 4 + 600, 400)
+    ok, _ = budget.can_spend(est, code=code)
+    if not ok:
+        return None
+
+    try:
+        resp = llm.chat(prompt, model_kind="default", max_tokens=500)
+        budget.record(
+            cost_usd=resp.cost_usd, provider=resp.provider, model=resp.model,
+            input_tok=resp.input_tokens, output_tok=resp.output_tokens,
+            code=code, kind="ma_research",
+        )
+        parsed = _try_parse_json(resp.text)
+        parsed["_queries_used"] = queries
+        return parsed
+    except Exception:
+        return None
 
 
 def research(

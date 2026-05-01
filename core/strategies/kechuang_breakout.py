@@ -28,6 +28,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from core.lockup_filter import is_near_lockup
+
 NAME = "科创/创业板平台突破"
 MIN_BARS = 80
 
@@ -66,6 +68,10 @@ def scan(df, symbol: str = "") -> dict | None:
     latest_date = df.iloc[-1]["date"]
     calendar_days = (latest_date - ipo_date).days
     if calendar_days > IPO_MAX_YEARS * 365:
+        return None
+
+    # D: 解禁期过滤（前后30天内跳过）
+    if is_near_lockup(ipo_date):
         return None
 
     closes  = df["close"].values.astype(float)

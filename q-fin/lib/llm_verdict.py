@@ -52,6 +52,7 @@ def _summarize_record(rec: dict) -> str:
     sh = rec.get("shareholders") or {}
     summary["major_new_entry"] = sh.get("major_new_entry")
     summary["top10_concentration_pct"] = sh.get("top10_concentration_pct")
+    summary["state_owned_pct"] = sh.get("state_owned_pct", 0)  # 国资持股%（流通盘压缩因子）
 
     fund = rec.get("fundamentals") or {}
     summary["fundamentals"] = _trim(fund, [
@@ -75,10 +76,22 @@ def _summarize_record(rec: dict) -> str:
     qsc = rec.get("q_seed_crosscheck") or {}
     summary["q_seed"] = _trim(qsc, ["is_in_q_seed", "matched_templates", "best_dist", "best_rank"])
 
+    # M&A 专项搜索结果（买方/被买方向、目标公司、交易方式）
+    ma = rec.get("ma_research")
+    if ma and ma.get("confidence") in ("高", "中"):
+        summary["ma_research"] = {k: v for k, v in ma.items()
+                                   if k not in ("_queries_used",) and v is not None}
+
     er = rec.get("entity_research") or {}
     if er and er.get("chain"):
+        chain = er["chain"]
         summary["entity_research"] = {
-            "chain_summary": _walk_chain_short(er["chain"]),
+            "chain_summary": _walk_chain_short(chain),
+            # 顶层实体（新进方）的关键信息直接提前，方便 LLM 做重组分析
+            "acquirer_entity": chain.get("entity"),
+            "acquirer_identity": chain.get("identity", "")[:80],
+            "acquirer_business": chain.get("business", "")[:150],
+            "acquirer_key_persons": chain.get("key_persons", []),
         }
 
     return json.dumps(summary, ensure_ascii=False, default=str)
@@ -101,6 +114,19 @@ def _walk_chain_short(node: dict, depth: int = 0, max_depth: int = 3) -> list[di
 def _build_prompt(rec_summary: str) -> str:
     return (
         "你是 A 股题材股分析师, 基于下面这只候选股的全部数据, 给出客观结论.\n\n"
+        "【控盘度分析规则】\n"
+        "state_owned_pct 是十大流通股东中国资持股占比. 国有股通常为限售股/非流通股, "
+        "因此 state_owned_pct 越高 → 实际可流通筹码越少 → 控盘度越高 → 主力更容易拉升.\n"
+        "  - state_owned_pct ≥ 30%: 高控盘, 流通盘极小, 视为利多因子\n"
+        "  - state_owned_pct 10-30%: 中控盘\n"
+        "  - state_owned_pct < 10%: 低控盘, 正常分析\n"
+        "top10_concentration_pct 如果主要来自国资, 不应视为流动性风险, 而应视为控盘利多.\n\n"
+        "【重组/注资分析规则】\n"
+        "如果数据中有产业资本新进或重组公告，必须详细分析以下内容并填入对应字段：\n"
+        "  - acquirer_name: 新进方/重组方的真实名称（穿透SPV找到背后实控人或母公司）\n"
+        "  - acquirer_background: 新进方的主营业务、行业背景、资本实力（≤60字）\n"
+        "  - restructure_direction: 重组后公司可能转型的方向或注入资产类型（≤40字）\n"
+        "若无重组/产业资本新进信号，这三个字段填 null.\n\n"
         "调查数据 (JSON):\n" + rec_summary + "\n\n"
         "请输出严格 JSON, 字段:\n"
         "  rating: 1-5 整数 (5=教科书级强信号, 1=噪音, 综合事件硬度+入主方质量+K线位置+已涨幅)\n"
@@ -109,7 +135,11 @@ def _build_prompt(rec_summary: str) -> str:
         "  theme_hardness: 硬/中/弱 (题材硬度)\n"
         "  entry_suggestion: 合理入场建议 (≤30 字)\n"
         "  key_risks: 关键风险 (string array, 1-3 条, 每条 ≤30 字)\n"
-        "  themes: 命中题材 (string array, 例 [AI, 算力])\n\n"
+        "  themes: 命中题材 (string array, 例 [AI, 算力])\n"
+        "  control_degree: 高控盘/中控盘/低控盘 (基于 state_owned_pct)\n"
+        "  acquirer_name: 新进方/重组方名称 (无则 null)\n"
+        "  acquirer_background: 新进方背景主业 (≤60字, 无则 null)\n"
+        "  restructure_direction: 重组转型方向 (≤40字, 无则 null)\n\n"
         "只输出 JSON, 不要解释."
     )
 

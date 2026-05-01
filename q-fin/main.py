@@ -394,11 +394,22 @@ def main():
         if args.dry_run:
             info(f"[dry-run] would invoke entity_research + verdict for {len(records)} stocks. estimated cost ~${0.02 * len(records):.2f}")
         else:
-            from entity_research import research as er_research
+            from entity_research import research as er_research, search_ma_context
             from llm_verdict import make_verdict
 
             for r in records:
-                # entity_research: 仅当有 major_new_entry 才查
+                # M&A 专项搜索：检测重组/收购类公告，双向搜索找目标公司或收购方
+                if "entity" in enabled:
+                    r["ma_research"] = search_ma_context(
+                        code=r["code"],
+                        name=r.get("name", ""),
+                        announcements=r.get("announcements_90d") or {},
+                        search=search,
+                        llm=llm,
+                        budget=budget,
+                    )
+
+                # entity_research: 仅当有 major_new_entry 才查（股东穿透）
                 if "entity" in enabled:
                     major = (r.get("shareholders") or {}).get("major_new_entry") or {}
                     root_entity = major.get("name") if major else None
@@ -413,7 +424,6 @@ def main():
                             budget=budget,
                             hints_path=hints_path,
                         )
-                        # 字段补 mode + provider 标识
                         r["entity_research"]["mode"] = mode
                         r["entity_research"]["llm_provider"] = llm.name
                         r["entity_research"]["search_provider"] = search.name if search else None

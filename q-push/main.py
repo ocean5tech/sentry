@@ -53,6 +53,82 @@ def get_field(rec: dict, path: str):
     return cur
 
 
+def _next_trading_day(base: str) -> str:
+    """返回 base (YYYY-MM-DD) 后第一个非周末交易日（简单版，不含节假日数据库）."""
+    import datetime
+    d = datetime.date.fromisoformat(base) + datetime.timedelta(days=1)
+    while d.weekday() >= 5:  # 5=Sat, 6=Sun
+        d += datetime.timedelta(days=1)
+    return d.isoformat()
+
+
+def _fmt_boll_detail(r: dict) -> list[str]:
+    """为 boll_support 信号生成详细交易参数块."""
+    signal_label = r.get("signal_label", "")
+    lower  = r.get("lower")
+    upper  = r.get("upper")
+    ma20   = r.get("ma20")
+    cur    = r.get("close") or r.get("last_price") or r.get("current_price")
+    vol_ratio = r.get("vol_ratio")
+    boll_pos  = r.get("boll_pos")
+    resilience = r.get("resilience")
+    exchange   = r.get("exchange", "")
+    scan_date  = r.get("scan_date", r.get("date", time.strftime("%Y-%m-%d")))
+
+    if lower is None or upper is None:
+        return []
+
+    lines = [f"【{signal_label}信号】({exchange})"]
+
+    boll_width = round((upper - lower) / ma20 * 100, 1) if ma20 else None
+    lines.append(f"- 布林区间: {lower:.2f} ～ {upper:.2f}"
+                 + (f"（宽度 {boll_width}%）" if boll_width else ""))
+    if boll_pos is not None:
+        lines.append(f"- 当前位置: {boll_pos:.1f}%（0=下轨, 100=上轨）")
+    if vol_ratio is not None:
+        vol_desc = "缩量" if vol_ratio < 0.8 else ("放量" if vol_ratio > 1.5 else "平量")
+        lines.append(f"- 量比: {vol_ratio:.2f}x（{vol_desc}）")
+    if resilience is not None:
+        lines.append(f"- 抗跌超额: +{resilience:.2f}%（大盘跌时跑赢指数）")
+
+    # 入场/止损/目标
+    lines.append("【操作建议】")
+    t1 = _next_trading_day(scan_date)
+    if signal_label in ("下沿开仓", "中线缩量"):
+        entry = round(lower * 1.01, 2) if lower else cur
+        stop  = round(lower * 0.97, 2) if lower else None
+        tgt   = round(upper, 2) if upper else None
+        stop_pct = round((stop - entry) / entry * 100, 1) if stop and entry else None
+        tgt_pct  = round((tgt  - entry) / entry * 100, 1) if tgt  and entry else None
+        lines.append(f"- T+1 入场参考: {entry:.2f} 元（{t1}）")
+        if stop:  lines.append(f"- 止损: {stop:.2f}（{stop_pct:+.1f}%，破下轨离场）")
+        if tgt:   lines.append(f"- 目标: {tgt:.2f}（{tgt_pct:+.1f}%，均值回归至上轨）")
+    elif signal_label == "回踩上沿":
+        prior_high = r.get("prior_high")
+        if prior_high:
+            lines.append(f"- 近期高点: {prior_high:.2f}（突破后回踩确认）")
+        entry = round(upper * 1.01, 2) if upper else cur  # 上轨上方1%确认入场
+        stop  = round(upper * 0.97, 2) if upper else None  # 跌破上轨止损
+        tgt   = round(prior_high * 1.10, 2) if prior_high else round(cur * 1.15, 2)
+        stop_pct = round((stop - entry) / entry * 100, 1) if stop and entry else None
+        tgt_pct  = round((tgt  - entry) / entry * 100, 1) if tgt  and entry else None
+        lines.append(f"- T+1 入场参考: {entry:.2f} 元（{t1}）")
+        if stop:  lines.append(f"- 止损: {stop:.2f}（{stop_pct:+.1f}%，破上轨支撑离场）")
+        if tgt:   lines.append(f"- 目标: {tgt:.2f}（{tgt_pct:+.1f}%，超越前高）")
+    else:  # 突破加仓
+        entry = cur
+        stop  = round(upper * 0.97, 2) if upper else None
+        tgt   = round(cur * 1.15, 2) if cur else None
+        stop_pct = round((stop - entry) / entry * 100, 1) if stop and entry else None
+        tgt_pct  = round((tgt  - entry) / entry * 100, 1) if tgt  and entry else None
+        lines.append(f"- T+1 入场参考: {entry:.2f} 元（{t1}，追涨需谨慎）")
+        if stop:  lines.append(f"- 止损: {stop:.2f}（{stop_pct:+.1f}%，跌回上轨下方离场）")
+        if tgt:   lines.append(f"- 目标: {tgt:.2f}（{tgt_pct:+.1f}%）")
+
+    lines.append("⚠️ 仅供研究参考，不构成投资建议")
+    return lines
+
+
 def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool) -> str:
     """records → 企业微信 markdown 文本."""
     out_cfg = cfg.get("output", {})
@@ -100,6 +176,35 @@ def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool
         if one_liner: sub.append(one_liner)
         if sub:
             lines.append("> " + " · ".join(sub))
+
+        # boll_support 专用详情
+        if r.get("signal_label") in ("下沿开仓", "中线缩量", "上沿突破加仓", "回踩上沿"):
+            for dl in _fmt_boll_detail(r):
+                lines.append(f"> {dl}")
+
+        # 重组/注资分析（有则展示）
+        v   = r.get("verdict") or {}
+        ma  = r.get("ma_research") or {}
+        acq_name = v.get("acquirer_name") or ma.get("acquirer")
+        acq_bg   = v.get("acquirer_background") or ma.get("acquirer_background")
+        restr    = v.get("restructure_direction") or ma.get("deal_direction")
+        tgt_co   = ma.get("target_company")
+        tgt_biz  = ma.get("target_business")
+        deal_str = ma.get("deal_structure")
+        scenario = ma.get("scenario")
+        conf     = ma.get("confidence")
+
+        if acq_name or tgt_co or restr:
+            lines.append("> 【重组/注资调查】")
+            if scenario and scenario != "不明":
+                lines.append(f"> - 模式: {scenario}{'（'+conf+'置信度）' if conf else ''}")
+            if tgt_co:   lines.append(f"> - 收购标的: {tgt_co}")
+            if tgt_biz:  lines.append(f"> - 标的业务: {tgt_biz}")
+            if deal_str: lines.append(f"> - 交易方式: {deal_str}")
+            if acq_name: lines.append(f"> - 入主方: {acq_name}")
+            if acq_bg:   lines.append(f"> - 入主方背景: {acq_bg}")
+            if restr:    lines.append(f"> - 重组方向: {restr}")
+
         lines.append("")
 
     # dashboard 链接

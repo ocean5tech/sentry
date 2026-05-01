@@ -12,7 +12,16 @@ def _is_institution(name: str) -> bool:
 
 
 def _is_state_owned(name: str) -> bool:
-    return any(k in name for k in ["国有资产", "国资", "国家控股", "投资控股"])
+    return any(k in name for k in [
+        "国有资产", "国资", "国家控股",
+        "财政部", "中央汇金",                    # 国家直接持股
+        "国家电网", "南方电网",                  # 电力央企
+        "中国石油", "中国石化", "中国移动", "中国联通", "中国电信",  # 三桶油/三大运营商
+        "国家开发", "中国建投", "中国诚通",      # 国开/国有资本运营
+    ]) or (
+        # 以"中国"开头且含"集团"/"股份"/"控股" → 大概率央企
+        name.startswith("中国") and any(k in name for k in ["集团", "股份有限公司", "控股"])
+    )
 
 
 def _entity_type(name: str) -> str:
@@ -144,12 +153,17 @@ def analyze(code: str, kw_cfg: dict, ak_module, cache) -> dict:
                 }
                 break
 
+    state_owned_pct = round(sum(
+        r["pct"] for r in top10 if r.get("entity_type") == "国资"
+    ), 2)
+
     return {
         "report_date": rd,
         "top10_free": top10,
         "new_entries_count": new_entries_count,
         "top1_pct": top1_pct,
         "top10_concentration_pct": round(concentration, 2),
+        "state_owned_pct": state_owned_pct,          # 十大流通股东中国资合计持股%
         "major_new_entry": major,
         "_err": err,
     }

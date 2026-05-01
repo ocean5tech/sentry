@@ -116,8 +116,8 @@ def run_strategy_scan(
                 "low":    round(float(last["low"]),   2),
                 "volume": int(last["volume"]),
             }
-            row.update({k: ("✓" if v else "✗") for k, v in result.items()
-                        if k not in ("score",)})
+            row.update({k: ("✓" if v else "✗") if isinstance(v, bool) else v
+                        for k, v in result.items() if k not in ("score",)})
             hits.append(row)
         except Exception:
             pass

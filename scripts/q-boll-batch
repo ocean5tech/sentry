@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# q-boll-batch: 交易日自动运行
+# 布林带策略: 下沿/中线缩量 + 上沿突破 → 各取 Top 5 → q-fin → 推送综合 Top 5
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")/.."
+LOG="$ROOT/logs/q-boll-batch.log"
+mkdir -p "$ROOT/logs" "$ROOT/q-fin/logs"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+
+log "=== q-boll-batch 启动 ==="
+
+# 1. 交易日检查
+if ! "$ROOT/scripts/is_trading_day"; then
+    log "今天非交易日, 退出"
+    exit 0
+fi
+log "今天是交易日, 继续"
+
+# 2. 加载 .env
+if [ -f "$ROOT/.env" ]; then
+    set -a; source "$ROOT/.env"; set +a
+fi
+
+PYTHON="$ROOT/.venv/bin/python"
+QFIN_PY="$ROOT/q-fin/.venv/bin/python"
+
+# 3. 全量扫描（两种信号一起出）
+log "扫描 boll_support 策略..."
+TMP_SCAN=$(mktemp /tmp/boll_scan_XXXXXX.json)
+"$PYTHON" "$ROOT/scripts/run_scan.py" \
+    --strategy boll_support \
+    --min-score 1 \
+    --quiet \
+    --format json \
+    --output "$TMP_SCAN" \
+    2>>"$LOG" || true
+
+if [ ! -s "$TMP_SCAN" ]; then
+    log "无命中, 退出"
+    rm -f "$TMP_SCAN"
+    exit 0
+fi
+
+HIT_COUNT=$("$PYTHON" -c "import json; d=json.load(open('$TMP_SCAN')); print(len(d))")
+log "命中 $HIT_COUNT 只"
+
+# 4. 两类信号各取 Top 5，合并去重后进 q-fin（最多10只）
+TMP_JSONL=$(mktemp /tmp/boll_hits_XXXXXX.jsonl)
+"$PYTHON" -c "
+import json
+
+hits = json.load(open('$TMP_SCAN'))
+
+# 下沿/中线缩量：按 score + resilience 排序
+support = [h for h in hits if h.get('signal') == 'support_entry']
+support.sort(key=lambda x: (-x.get('score', 0), -x.get('resilience', 0)))
+top_support = support[:5]
+
+# 上沿突破加仓：按 score + vol_ratio 排序，需 score>=3
+breakout = [h for h in hits if h.get('signal') == 'breakout_add' and h.get('score', 0) >= 3]
+breakout.sort(key=lambda x: (-x.get('score', 0), -x.get('vol_ratio', 0)))
+top_breakout = breakout[:3]
+
+# 回踩上沿：按 score + 位置接近100% 排序
+pullback = [h for h in hits if h.get('signal') == 'pullback_entry']
+pullback.sort(key=lambda x: (-x.get('score', 0), -x.get('boll_pos', 0)))
+top_pullback = pullback[:2]
+
+# 合并去重（code 为键），顺序：支撑 > 回踩 > 突破
+seen = set()
+for h in top_support + top_pullback + top_breakout:
+    if h['code'] not in seen:
+        seen.add(h['code'])
+        print(json.dumps(h, ensure_ascii=False))
+" > "$TMP_JSONL"
+rm -f "$TMP_SCAN"
+
+TOTAL_IN=$(wc -l < "$TMP_JSONL")
+log "进入 q-fin: $TOTAL_IN 只（下沿/中线 Top5 + 突破 Top5）"
+
+# 5. q-fin paid 分析
+QFIN_OUT=$(mktemp /tmp/boll_qfin_XXXXXX.jsonl)
+"$QFIN_PY" "$ROOT/q-fin/main.py" \
+    --paid \
+    --input "$TMP_JSONL" \
+    --format jsonl \
+    --output "$QFIN_OUT" \
+    2>>"$LOG"
+
+QFIN_COUNT=$(wc -l < "$QFIN_OUT")
+log "q-fin 完成, $QFIN_COUNT 条"
+
+# 6. merge 原始扫描字段进 q-fin 输出，取综合 Top 5 推送
+log "推送综合 Top 5..."
+"$PYTHON" -c "
+import json
+
+# 原始扫描字段 index（用于透传 signal_label/lower/upper 等到推送）
+scan_meta = {}
+for line in open('$TMP_JSONL'):
+    line = line.strip()
+    if line:
+        try:
+            obj = json.loads(line)
+            scan_meta[obj['code']] = obj
+        except: pass
+
+records = []
+for line in open('$QFIN_OUT'):
+    line = line.strip()
+    if line:
+        try:
+            r = json.loads(line)
+            # 把原始策略字段 merge 进来（q-fin 字段优先，但策略特有字段补回）
+            meta = scan_meta.get(r.get('code'), {})
+            for k in ('signal', 'signal_label', 'lower', 'upper', 'ma20',
+                      'boll_pos', 'boll_width', 'vol_ratio', 'resilience',
+                      'breakout_pct', 'down_days', 'exchange', 'close'):
+                if k in meta and (k not in r or r[k] is None):
+                    r[k] = meta[k]
+            records.append(r)
+        except: pass
+
+records.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+for r in records[:5]:
+    label = r.get('signal_label', '')
+    if label in ('下沿开仓', '中线缩量'):
+        tag = '布林下沿'
+    elif label == '回踩上沿':
+        tag = '布林回踩'
+    else:
+        tag = '布林突破'
+    print(json.dumps({'_push_tag': tag, **r}, ensure_ascii=False))
+" | while IFS= read -r rec; do
+    tag=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('_push_tag','布林'))" "$rec")
+    echo "$rec" | "$PYTHON" "$ROOT/q-push/main.py" --tag "$tag" 2>>"$LOG"
+    sleep 1
+done
+
+log "推送完成"
+
+rm -f "$TMP_JSONL" "$QFIN_OUT" 2>/dev/null || true
+
+log "=== q-boll-batch 结束 ==="
