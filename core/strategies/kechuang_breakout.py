@@ -3,14 +3,15 @@
 
 逻辑：
   针对科创板(688xxx)和创业板(300xxx)的新股特有模式：
-  上市后 60~500 个交易日内，经历一段低振幅横盘整理（筹码收集期），
+  上市后 1~5 年内，经历一段低振幅横盘整理（筹码收集期），
   随后价格放量突破横盘区间上沿 → 发出买入信号。
+  （品高688227上市4.3年命中、源杰688498上市3.4年命中、寒武纪688256上市5.8年命中）
 
   例子股: 品高股份(688227)  源杰科技(688498)  寒武纪(688256)
 
 条件：
   1. 交易所过滤：仅 688xxx（科创板）或 300xxx（创业板）
-  2. 上市年龄：60~500 个交易日（3个月~2年）
+  2. 上市年龄：IPO_MIN_DAYS 交易日 ~ IPO_MAX_YEARS 年（确保有足够数据 + 筹码还未完全换手）
   3. 近 PLATFORM_WIN 天形成低振幅平台：振幅 < PLATFORM_MAX_AMP
   4. 平台不能是下跌趋势（MA20 斜率 >= -0.3%/天）
   5. 今日收盘突破平台上沿（前 PLATFORM_WIN 天最高收盘价）
@@ -36,6 +37,7 @@ PLATFORM_MAX_AMP = 0.30   # 平台振幅上限（(max-min)/min）
 VOL_MUL          = 1.5    # 突破放量倍数（相对20日均量）
 BREAKOUT_MARGIN  = 0.01   # 突破需超出平台上沿的幅度（1%，过滤假突破）
 IPO_MIN_DAYS     = 80     # 上市至少 N 个交易日（需要足够数据建立平台）
+IPO_MAX_YEARS    = 5      # 上市不超过 N 年（品高4.3yr/源杰3.4yr均在此窗口内）
 SLOPE_MIN        = -0.003 # 平台 MA20 斜率下限（避免下跌途中的假平台）
 
 # 科创板 + 创业板前缀
@@ -57,8 +59,13 @@ def scan(df, symbol: str = "") -> dict | None:
     if n < MIN_BARS:
         return None
 
-    # 2. 上市年龄过滤（至少有足够数据形成平台）
+    # 2. 上市年龄过滤：用首行日期作为 IPO 日，精确判断
     if n < IPO_MIN_DAYS:
+        return None
+    ipo_date    = df.iloc[0]["date"]
+    latest_date = df.iloc[-1]["date"]
+    calendar_days = (latest_date - ipo_date).days
+    if calendar_days > IPO_MAX_YEARS * 365:
         return None
 
     closes  = df["close"].values.astype(float)
@@ -123,7 +130,8 @@ def scan(df, symbol: str = "") -> dict | None:
         "platform_days":  PLATFORM_WIN,
         "vol_ratio":      round(vol_ratio, 2),           # 今日量比
         "breakout_pct":   round((today_close / plat_hi - 1) * 100, 1),  # 突破幅度 %
-        "ipo_days_approx": n,                            # 上市约多少交易日
+        "ipo_date":        str(ipo_date.date()) if hasattr(ipo_date, "date") else str(ipo_date),
+        "ipo_calendar_days": calendar_days,              # 上市至今日历天数
         "match_pct":      match_pct,
         "exchange":       "科创板" if (symbol.startswith("688")) else "创业板",
     }

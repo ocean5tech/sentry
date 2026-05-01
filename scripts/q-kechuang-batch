@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# q-kechuang-batch: 交易日自动运行
+# 科创/创业板平台突破策略: 扫描 → q-fin → 推送 Top 3
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")/.."
+LOG="$ROOT/logs/q-kechuang-batch.log"
+LOGFILE_QFIN="$ROOT/q-fin/logs"
+mkdir -p "$ROOT/logs" "$LOGFILE_QFIN"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+
+log "=== q-kechuang-batch 启动 ==="
+
+# 1. 交易日检查
+if ! "$ROOT/scripts/is_trading_day"; then
+    log "今天非交易日, 退出"
+    exit 0
+fi
+log "今天是交易日, 继续"
+
+# 2. 加载 .env
+if [ -f "$ROOT/.env" ]; then
+    set -a; source "$ROOT/.env"; set +a
+fi
+
+PYTHON="$ROOT/.venv/bin/python"
+QFIN_PY="$ROOT/q-fin/.venv/bin/python"
+
+# 3. 扫描科创/创业板平台突破
+log "扫描 kechuang_breakout 策略..."
+TMP_SCAN=$(mktemp /tmp/kechuang_scan_XXXXXX.json)
+"$PYTHON" "$ROOT/scripts/run_scan.py" \
+    --strategy kechuang_breakout \
+    --min-score 3 \
+    --quiet \
+    --format json \
+    --output "$TMP_SCAN" \
+    2>>"$LOG" || true
+
+if [ ! -s "$TMP_SCAN" ]; then
+    log "无命中, 退出"
+    rm -f "$TMP_SCAN"
+    exit 0
+fi
+
+HIT_COUNT=$("$PYTHON" -c "import json; d=json.load(open('$TMP_SCAN')); print(len(d))")
+log "命中 $HIT_COUNT 只"
+
+# 4. 转为 JSONL (q-fin 要求每行一条)
+TMP_JSONL=$(mktemp /tmp/kechuang_hits_XXXXXX.jsonl)
+"$PYTHON" -c "
+import json
+hits = json.load(open('$TMP_SCAN'))
+for h in hits:
+    print(json.dumps(h, ensure_ascii=False))
+" > "$TMP_JSONL"
+rm -f "$TMP_SCAN"
+
+# 5. 跑 q-fin paid 分析，输出 JSONL
+log "运行 q-fin paid 分析..."
+QFIN_OUT=$(mktemp /tmp/kechuang_qfin_XXXXXX.jsonl)
+"$QFIN_PY" "$ROOT/q-fin/main.py" \
+    --paid \
+    --input "$TMP_JSONL" \
+    --format jsonl \
+    --output "$QFIN_OUT" \
+    2>>"$LOG"
+
+QFIN_COUNT=$(wc -l < "$QFIN_OUT")
+log "q-fin 分析完成, $QFIN_COUNT 条记录"
+
+# 6. 取 Top 3 推送（按 q-fin score 降序）
+log "推送 Top 3..."
+"$PYTHON" -c "
+import json, sys
+records = []
+for line in open('$QFIN_OUT'):
+    line = line.strip()
+    if line:
+        records.append(json.loads(line))
+records.sort(key=lambda x: x.get('score', 0), reverse=True)
+for r in records[:3]:
+    print(json.dumps(r, ensure_ascii=False))
+" | while IFS= read -r rec; do
+    echo "$rec" | python3 "$ROOT/q-push/main.py" --tag "科创突破" 2>>"$LOG"
+    sleep 1
+done
+
+log "推送完成"
+
+# 7. 清理临时文件
+rm -f "$TMP_JSONL" "$QFIN_OUT" 2>/dev/null || true
+
+log "=== q-kechuang-batch 结束 ==="

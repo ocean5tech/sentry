@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# q-chatbot-start: 启动 Flask 服务 + cloudflared 内网穿透
+# 运行后会打印公网URL，把URL填入企业微信后台的"接收消息"回调URL
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")/.."
+PORT=8502
+LOG="$ROOT/logs/q-chatbot.log"
+TUNNEL_LOG="$ROOT/logs/cloudflared.log"
+
+mkdir -p "$ROOT/logs"
+
+# 加载 .env
+[ -f "$ROOT/.env" ] && set -a && source "$ROOT/.env" && set +a
+
+echo "[q-chatbot] 启动 Flask 服务 port=$PORT ..."
+"$ROOT/.venv/bin/python" "$ROOT/q_chatbot/main.py" > "$LOG" 2>&1 &
+FLASK_PID=$!
+echo "[q-chatbot] Flask PID=$FLASK_PID"
+sleep 2
+
+# 检查 Flask 是否正常启动
+if ! kill -0 $FLASK_PID 2>/dev/null; then
+    echo "[q-chatbot] Flask 启动失败，查看日志: $LOG"
+    cat "$LOG"
+    exit 1
+fi
+
+echo "[q-chatbot] 启动 cloudflared 隧道..."
+"$ROOT/scripts/cloudflared" tunnel --url "http://localhost:$PORT" \
+    --logfile "$TUNNEL_LOG" \
+    --no-autoupdate &
+TUNNEL_PID=$!
+echo "[q-chatbot] cloudflared PID=$TUNNEL_PID"
+
+echo ""
+echo "等待隧道建立（约5秒）..."
+sleep 5
+
+# 从日志提取公网URL
+PUBLIC_URL=$(grep -oP 'https://[a-z0-9\-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | tail -1)
+if [ -n "$PUBLIC_URL" ]; then
+    echo ""
+    echo "============================================"
+    echo "  公网回调URL:"
+    echo "  ${PUBLIC_URL}/callback"
+    echo ""
+    echo "  请到企业微信后台填写此URL:"
+    echo "  应用管理 → 福宝抓股 → 接收消息 → URL"
+    echo "============================================"
+else
+    echo "[q-chatbot] 隧道URL未就绪，请查看: $TUNNEL_LOG"
+fi
+
+echo ""
+echo "服务已在后台运行。查看日志:"
+echo "  Flask:       tail -f $LOG"
+echo "  cloudflared: tail -f $TUNNEL_LOG"
+echo ""
+echo "停止服务: kill $FLASK_PID $TUNNEL_PID"
+echo "$FLASK_PID $TUNNEL_PID" > "$ROOT/logs/q-chatbot.pids"

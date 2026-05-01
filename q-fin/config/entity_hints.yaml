@@ -9,6 +9,46 @@ partnerships:
     - 核芯互联
     auto_added: true
     added_ts: 1777545164.5754821
+  舟山慧博创展创业投资合伙企业(有限合伙):
+    identity: 私募合伙企业(SPV持股载体)
+    business: 成立于2015年，注册资本1亿人民币，注册于浙江舟山综合保税区，主营创业投资（限投资未上市企业），曾用名并有跨省迁移记录，系典型的资本运作持股平台。
+    key_persons:
+    - 余浩
+    auto_added: true
+    added_ts: 1777607926.3539047
+  无锡微至源创投资企业(有限合伙):
+    identity: 有限合伙企业（潜在投资或持股载体）
+    business: 根据现有信息，未找到与“无锡微至源创投资企业(有限合伙)”直接相关的公开资料，其业务背景和运营状态不明，可能为未公开或新设的投资载体。
+    key_persons: []
+    auto_added: true
+    added_ts: 1777607940.746832
+  景宁晶殷华企业管理合伙企业(有限合伙):
+    identity: parse_failed
+    business: ''
+    key_persons: []
+    auto_added: true
+    added_ts: 1777607954.3703878
+  瑞昌骏成创业投资合伙企业(有限合伙):
+    identity: 有限合伙持股载体 (SPV)
+    business: 瑞昌骏成创业投资合伙企业（有限合伙）作为有限合伙型创业投资企业，主要功能为持有资产、进行股权投资或资本运作，具体业务背景不明。
+    key_persons: []
+    auto_added: true
+    added_ts: 1777607973.5163102
+  宁波隆华汇股权投资管理有限公司-安徽高新投新材料产业基金合伙企业(有限合伙):
+    identity: 有限合伙型私募股权投资基金（SPV持股载体）
+    business: 主营业务为股权投资，通过投资新材料产业相关企业获取资本增值，由普通合伙人（GP）宁波隆华汇股权投资管理有限公司负责管理运营。
+    key_persons:
+    - 宁波隆华汇股权投资管理有限公司
+    - 安徽高新投
+    auto_added: true
+    added_ts: 1777608015.4005842
+  安徽高新投先进材料投资基金合伙企业（有限合伙）:
+    identity: 私募合伙企业(SPV持股载体)
+    business: 以私募基金形式从事股权投资及投资管理，专注于先进材料领域，成立于2024年，注册资本3亿元，位于安徽淮北高新区。
+    key_persons:
+    - 安徽省创业投资有限公司
+    auto_added: true
+    added_ts: 1777608126.983785
 companies:
   清华大学电子工程系:
     identity: budget_skipped
@@ -28,6 +68,59 @@ companies:
     key_persons: []
     auto_added: true
     added_ts: 1777587796.1332936
+  南方科技大学:
+    identity: 市属公办新型研究型大学
+    business: 深圳市人民政府举办的全日制公办高校，国家高等教育综合改革试验校，国家‘双一流’建设高校，以理工科为主，致力于成为世界一流研究型大学。
+    key_persons:
+    - 薛其坤（校长）
+    - 李凤亮（党委书记）
+    auto_added: true
+    added_ts: 1777607926.3539171
+  香港惩教署:
+    identity: 香港特别行政区政府保安局辖下的纪律部队
+    business: 负责香港的羁管（监狱管理）及更生服务，管理包括监狱、惩教所、收押所、戒毒所等29间设施，拥有近7,000名惩教人员。
+    key_persons:
+    - 黄国兴
+    - 义律
+    - 坚伟
+    auto_added: true
+    added_ts: 1777607926.353919
+  宁波隆华汇股权投资管理有限公司:
+    identity: 小微企业，股权投资管理公司
+    business: 主要从事股权投资管理及相关咨询服务，不得从事吸收存款、融资担保、代客理财等金融业务。
+    key_persons:
+    - 胡智慧
+    - 钱怡雯
+    auto_added: true
+    added_ts: 1777608015.4005866
+  Hao Yu:
+    identity: 自然人，常见中文男性姓名
+    business: 搜索结果为台湾棒球选手李灏宇（Hao-Yu Lee）及中文名浩宇的含义，未发现明确的单一实体背景。
+    key_persons:
+    - Hao-Yu Lee (棒球选手)
+    auto_added: true
+    added_ts: 1777608054.622516
+  安徽高新投:
+    identity: 国有独资产业投资平台（省政府引导基金管理人）
+    business: 安徽省投资集团旗下产业板块统筹运作平台，注册资本100亿元，主体信用AAA，负责省政府引导基金管理，通过基金投资培育战略性新兴产业。
+    key_persons:
+    - 安徽省投资集团控股有限公司
+    auto_added: true
+    added_ts: 1777608126.9837797
+  安徽省投资集团控股有限公司:
+    identity: 安徽省属国有独资企业（省国资委监管）
+    business: 作为安徽省政府投资主体，从事基础设施、产业投资、金融等领域的资本运营与国有资产管理，推动区域产业升级。
+    key_persons:
+    - 朱策
+    - 郭武伟
+    - 张日升
+    - 陈振红
+    - 方泰峰
+    - 马占文
+    - 王光平
+    - 王亚峰
+    auto_added: true
+    added_ts: 1777608126.983783
 persons:
   胡康桥:
     identity: ''
@@ -52,3 +145,30 @@ persons:
     - 贵州酒易天下酒业投资有限公司
     auto_added: true
     added_ts: 1777587796.1332853
+  余浩:
+    identity: 自然人，香港前职业足球运动员/南方科技大学教授
+    business: 余浩邦为香港前职业足球前锋，现任香港惩教署官员；余浩（Hao Yu）为南方科技大学教授，研究方向包括3D-IC、AI加速器及太赫兹电子学。
+    key_persons:
+    - 余浩邦
+    - Hao Yu
+    auto_added: true
+    added_ts: 1777607926.3539143
+  胡智慧:
+    identity: 渥太华中医师
+    business: 拥有36年中医临床经验，包括23年中国内地和13年加拿大渥太华经验，提供针灸、拔罐和中药服务，接受保险。
+    key_persons: []
+    auto_added: true
+    added_ts: 1777608015.40059
+  钱怡雯:
+    identity: 自然人，台湾新闻工作者及政论节目主持人
+    business: 钱怡君（钱子）现任TVBS《新闻大白话》《TVBS战情室》主持人，曾任空服员、记者、台中市政府顾问。
+    key_persons:
+    - 钱怡君
+    auto_added: true
+    added_ts: 1777608015.4005919
+  余浩邦:
+    identity: 香港职业足球运动员
+    business: 生于1989年8月19日，司职前锋，现效力于香港甲组足球联赛球队宏大，曾入选香港代表队。
+    key_persons: []
+    auto_added: true
+    added_ts: 1777608054.6225133

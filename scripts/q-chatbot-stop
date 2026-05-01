@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+PIDS_FILE="$(dirname "$0")/../logs/q-chatbot.pids"
+if [ -f "$PIDS_FILE" ]; then
+    kill $(cat "$PIDS_FILE") 2>/dev/null && echo "q-chatbot stopped" || echo "already stopped"
+    rm -f "$PIDS_FILE"
+else
+    echo "no PID file found"
+fi
