@@ -25,6 +25,15 @@ st.markdown("""<style>
 html,body,[class*="css"]{font-family:'SF Mono','Roboto Mono',monospace!important}
 /* 隐藏默认页边距 */
 .block-container{padding:0.8rem 1rem!important}
+/* 手机端：两栏变单栏 */
+@media (max-width:768px){
+  .block-container{padding:0.4rem 0.4rem!important}
+  [data-testid="column"]{min-width:100%!important;width:100%!important}
+  [data-testid="stMetricValue"]{font-size:1.1rem!important}
+  h1{font-size:.95rem!important}
+  h2{font-size:.85rem!important}
+  details summary{font-size:.78rem!important}
+}
 /* 标题 */
 h1{font-size:1.1rem!important;color:#FFD700!important;margin:0!important;padding:0!important}
 h2{font-size:.95rem!important;color:#E8E9EB!important;margin:.3rem 0 .2rem!important;
