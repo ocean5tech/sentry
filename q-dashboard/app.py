@@ -76,14 +76,71 @@ def load_json(path: str) -> list:
         return []
 
 @st.cache_data(ttl=120)
-def all_qfin_today(scan_date: str) -> list[dict]:
-    log_dir = Path(CFG["paths"]["q_fin_logs"])
+def qseed_recommend(scan_date: str) -> tuple[str, list[dict]]:
+    """以 q-seed 结果为锚，再用 q-fin 补充详情。
+    返回 (实际数据日期, records)"""
+    seed_dir = Path(CFG["paths"]["q_seed_logs"])
+    fin_dir  = Path(CFG["paths"]["q_fin_logs"])
     ymd = scan_date.replace("-", "")
-    best: dict[str, dict] = {}
-    for f in log_dir.glob(f"q-fin_top*_{ymd}_*.jsonl"):
+
+    # 找当天 q-seed 文件，没有则找最近一次
+    seed_files = sorted(seed_dir.glob(f"q-seed_top*_{ymd}_*.jsonl"), reverse=True)
+    actual_date = scan_date
+    if not seed_files:
+        all_seed = sorted(seed_dir.glob("q-seed_top*_*.jsonl"), reverse=True)
+        seed_files = all_seed[:1]
+        if seed_files:
+            m = re.search(r"(\d{8})", seed_files[0].name)
+            if m:
+                d = m.group(1)
+                actual_date = f"{d[:4]}-{d[4:6]}-{d[6:]}"
+
+    if not seed_files:
+        return scan_date, []
+
+    seed_records = load_jsonl(str(seed_files[0]))
+    seed_codes = {r.get("code") for r in seed_records if r.get("code")}
+
+    # 找 q-fin 补充（用实际日期的文件，只取 top_n > 3 的批处理文件）
+    fin_ymd = actual_date.replace("-", "")
+    fin_index: dict[str, dict] = {}
+    for f in fin_dir.glob(f"q-fin_top*_{fin_ymd}_*.jsonl"):
+        top_n_m = re.search(r"q-fin_top(\d+)_", f.name)
+        if top_n_m and int(top_n_m.group(1)) <= 2:
+            continue  # 跳过单股/双股的零散分析
         for r in load_jsonl(str(f)):
             code = r.get("code")
-            if code and r.get("score", 0) >= best.get(code, {}).get("score", -1):
+            if code and r.get("score", 0) >= fin_index.get(code, {}).get("score", -1):
+                fin_index[code] = r
+
+    # 合并：q-seed 定顺序，q-fin 补详情
+    result = []
+    for r in seed_records:
+        code = r.get("code")
+        if not code:
+            continue
+        merged = {**r}
+        if code in fin_index:
+            merged.update({k: v for k, v in fin_index[code].items()
+                           if v is not None and k not in ("code","name","rank")})
+        result.append(merged)
+
+    return actual_date, result
+
+
+@st.cache_data(ttl=120)
+def kechuang_records(scan_date: str) -> list[dict]:
+    """科创/创业板：只用 top_n >= 5 的 q-fin 批处理文件"""
+    fin_dir = Path(CFG["paths"]["q_fin_logs"])
+    ymd = scan_date.replace("-", "")
+    best: dict[str, dict] = {}
+    for f in fin_dir.glob(f"q-fin_top*_{ymd}_*.jsonl"):
+        top_n_m = re.search(r"q-fin_top(\d+)_", f.name)
+        if not top_n_m or int(top_n_m.group(1)) < 5:
+            continue
+        for r in load_jsonl(str(f)):
+            code = r.get("code","")
+            if is_kechuang(code) and r.get("score", 0) >= best.get(code, {}).get("score", -1):
                 best[code] = r
     return sorted(best.values(), key=lambda x: x.get("score", 0), reverse=True)
 
@@ -176,10 +233,9 @@ with hdr_r:
 st.markdown("<hr>", unsafe_allow_html=True)
 
 # ── 数据加载 ───────────────────────────────────────────────────
-ymd       = sel.replace("-", "")
-fin_all   = all_qfin_today(sel)
-recommend = [r for r in fin_all if not is_kechuang(r.get("code",""))]
-kechuang  = [r for r in fin_all if is_kechuang(r.get("code",""))]
+ymd = sel.replace("-", "")
+seed_date, recommend = qseed_recommend(sel)
+kechuang  = kechuang_records(sel)
 news_all  = latest_qnews(sel)
 ipo_path  = CACHE / f"ipo_{ymd}.json"
 ipos      = load_json(str(ipo_path)) if ipo_path.exists() else []
@@ -203,6 +259,8 @@ with left:
 
     # ── 形态选股 ──────────────────────────────────────────
     st.markdown("## 🌱 形态选股")
+    if seed_date != sel:
+        st.caption(f"⚠️ 当日无选股记录，显示最近一次: {seed_date}")
     if not recommend:
         st.caption("今日无数据")
     else:

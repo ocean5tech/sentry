@@ -15,4 +15,4 @@ output:
   max_records_per_msg: 5                     # 单次推送最多 5 条 (避免超长)
   emoji_rank: ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
   truncate_one_liner: 30                     # one_liner 字符截断
-  include_link: true                         # 是否带 dashboard 链接
+  include_link: false                        # dashboard 仅本地访问，推送不带链接
