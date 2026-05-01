@@ -1,63 +1,166 @@
-# sentry — A股量化选股系统
+# sentry/quant — A股量化选股系统
 
-**V1.0** (2026-04-27) · 9 个 q-* 命令 + cron 编排, 围绕 A 股 ~5500 只股票的事件/形态/基本面驱动选股.
+**目的**：自动扫描全市场 A 股（~5500只），识别符合历史强势形态的起爆候选股，叠加事件驱动（公告/新闻）分析，每个交易日晚 8 点通过企业微信推送可操作的选股建议。
 
-> 完整介绍 → [PROJECT_SUMMARY.md](./PROJECT_SUMMARY.md)
+---
 
-## 命令清单
+## 你会得到什么
+
+每个交易日晚上，企业微信群自动收到两类消息：
+
+### 消息 1 — 个股形态信号（q-pick-today，20:00）
 
 ```
-核心 (V0)
-├── q-seed       形态相似度 KNN (永远 free)
-├── q-fin        基本面深挖 (free / --paid 烧 token)
-└── q-news       事件驱动新闻 (规则引擎)
+## 📊 截至 2026-04-30 收盘 · 选股信号
 
-辅助 (V1)
-├── q-sync       下 TDX 日线 zip + 备份回滚
-├── q-sync-fin   下 TDX 财报 zip + 备份回滚
-├── q-clean      retention 磁盘清理
-├── q-push       stdin JSONL → 企业微信群机器人
-├── q-dashboard  Streamlit 4-tab 详情 (华尔街金融配色)
-└── q-batch.sh   6pm cron 编排所有
+**长龄液压 (605389)** — 高关注
+
+【形态匹配 (q-seed)】
+- 模板: 澜起科技型  匹配度 81%  (dist=4.64)
+- 起爆日: 2026-04-22  [首次起爆]
+- 历史胜率: 80天 55%, 均收益 +17%
+- T+1 入场参考: 116.98 元
+- 止损: 108.79 (-7%)  目标: 136.40 (+17%)  持仓: 80天
+
+【深度调研 (q-fin)】
+> LLM: deepseek/deepseek-reasoner | 搜索: duckduckgo
+评级: ⭐⭐⭐ (3/5)  要约收购芯片资产，但涨幅已大
+
+**触发事件:**
+- 要约收购 (2026-03-14)
+
+**调研推理链:**
+- 无锡核芯听涛科技合伙企业 (缓存)
+  结论: 有限合伙企业(资本运作SPV)
+  - 胡康桥 (缓存)  结论: 自然人
+  - 核芯互联（北京）(搜索)
+    · 核芯互联 - 数模混合信号链芯片
+    结论: 模拟芯片设计公司
+
+**风险:**
+- 股价已大幅上涨
+- 题材兑现不确定性
 ```
 
-## 文档
+### 消息 2 — 事件驱动信号（q-news-daily，20:15）
 
-| 文档 | 用途 |
-|---|---|
-| [PROJECT_SUMMARY.md](./PROJECT_SUMMARY.md) | 项目总览 (开始读这个) |
-| [docs/USER_GUIDE_q-seed.md](./docs/USER_GUIDE_q-seed.md) | q-seed 用户手册 |
-| [docs/USER_GUIDE_q-fin.md](./docs/USER_GUIDE_q-fin.md) | q-fin 用户手册 (含 paid + provider 切换) |
-| [docs/USER_GUIDE_q-news.md](./docs/USER_GUIDE_q-news.md) | q-news 用户手册 |
-| [docs/USER_GUIDE_aux.md](./docs/USER_GUIDE_aux.md) | 5 辅助命令 + cron 部署 |
-| [docs/DESIGN_q-{seed,fin,news}.md](./docs/) | 各命令架构设计 |
-| [docs/SOURCES_q-news.md](./docs/SOURCES_q-news.md) | 内网新闻源实测可用性 |
-| [CLAUDE.md](./CLAUDE.md) | AI 助手 guidelines (含疯牛种子 spec) |
+**利多个股（单独推送）：**
+```
+## 📊 2026-05-01 · 公告事件信号
 
-## 部署
+**今天国际 (300532)** — 利多 高影响
+
+【公告】关于控股股东签署股份转让协议构成管理层收购暨控制权拟变更的公告
+【分析 (deepseek-chat)】
+方向: 利多 | 影响: 高
+逻辑: 管理层收购使股东与管理层利益高度绑定，叠加控制权变更引发
+      资产重组或治理优化预期，短期利多。
+```
+
+**利空汇总（一条）：**
+```
+## ⚠️ 2026-05-01 · 风险事件警示
+
+共 20 只股票出现高影响利空公告（股权冻结/资金占用/立案）：
+- 广信股份 (603599) — 控股股东收到证监会立案告知书
+  涉及信息披露违规，引发公司治理担忧，股价短期承压
+- 三安光电 (600703) — 控股股东股份被轮候冻结 ...
+```
+
+---
+
+## 系统架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    数 据 层                               │
+│  TDX 日线(hsjday)  TDX 财报(tdxfin)  cninfo公告  新闻RSS │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│                    分 析 层                               │
+│                                                          │
+│  q-seed ──── KNN 形态相似度 (6模板 × 5500只股票)          │
+│      │                                                   │
+│  q-backtest ─ walk-forward 回测验证准确率                  │
+│      │                                                   │
+│  q-fin ───── 深度事件调研 (DeepSeek + DDG/Tavily搜索)     │
+│                                                          │
+│  q-news ──── 新闻/公告分析 (LLM 利多/利空推理链)           │
+└────────────────────────┬────────────────────────────────┘
+                         │
+┌────────────────────────▼────────────────────────────────┐
+│                    输 出 层                               │
+│  q-push → 企业微信群  │  q-dashboard → Streamlit :8501  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 10 个命令一览
+
+| 命令 | 职责 | 触发方式 |
+|---|---|---|
+| `q-pick-today` | 今日形态信号+q-fin+推送（主流程） | cron 20:00 |
+| `q-news` | cninfo公告+新闻扫描+LLM分析+推送 | cron 20:15 |
+| `q-seed-hongjing` | 宏景/香农/福晶/澜起型形态扫描 | 被 q-pick-today 调用 |
+| `q-seed-litong` | 利通/云南锗业型形态扫描（loose模式） | 被 q-pick-today 调用 |
+| `q-backtest-fast` | multi-horizon walk-forward 回测 | 手动/被调用 |
+| `q-fin` | 深度基本面+事件调研（LLM付费） | 被 q-pick-today 调用 |
+| `q-push` | 企业微信 webhook markdown 推送 | 被各命令调用 |
+| `q-sync` | 下载 TDX 日线 zip → data/tdx | 手动（每日收盘后） |
+| `q-sync-fin` | 下载 TDX 财报 zip → data/tdx_fin | 手动（季报期） |
+| `q-dashboard` | Streamlit 4-tab 可视化面板 | 常驻 :8501 |
+| `q-clean` | 清理过期 logs/cache | 手动 |
+
+### 6 个形态模板（回测数据 2025-08-01~2026-04-01）
+
+| 模板 | 标杆股 | 80天胜率 | 均收益 | 特征 |
+|---|---|---|---|---|
+| xiangnong | 香农芯创 300475 | **89%** | +61% | 严格收敛，n=38 小样本 |
+| yunnange  | 云南锗业 002428 | **78%** | +32% | 宽幅周期股，再次起爆100% |
+| hongjing  | 宏景科技 301396 | 56% | +19% | 短期强势波浪，必须拿满80天 |
+| lanqi     | 澜起科技 688008 | 55% | +17% | 科创板 |
+| fujing    | 福晶科技 002222 | 49% | +31% | 均收益高，20天也可短线 |
+| litong    | 利通电子 603629 | 41% | +10% | 已停用，区分度低 |
+
+> dist<5 严格匹配；再次起爆（60日内重复）整体胜率提升至 **87%**
+
+### 每日工作流
+
+```
+14:55  A股收盘
+  ↓
+15:xx  手动：复制 hsjday{mmdd}/ 到 ~/Downloads/YYYYMMDD/（Windows侧）
+  ↓
+20:00  [cron] q-pick-today-batch
+         ├─ is_trading_day 检查（非交易日自动退出）
+         ├─ rsync 今日日线数据
+         ├─ q-backtest-fast 单日扫描 + 过滤 sig_date==today
+         ├─ ⭐⭐⭐⭐+ 候选跑 q-fin（DeepSeek推理+DDG搜索）
+         └─ 每股一条消息 → 企业微信
+  ↓
+20:15  [cron] q-news-daily-batch
+         ├─ is_trading_day 检查
+         ├─ cninfo 最近7天重大公告（~262条/周）
+         ├─ DeepSeek 逐条分析：利多/利空 + 逻辑链
+         ├─ 利多高影响 → 单独推送
+         └─ 利空高影响 → 汇总警示推送
+```
+
+---
+
+## 快速开始
 
 ```bash
-# 1. 凭据
-cat > ~/sentry/quant/.env <<EOF
-ANTHROPIC_API_KEY=sk-ant-...
-WECHAT_WEBHOOK_URL=https://qyapi.weixin.qq.com/...
-EOF
-chmod 600 ~/sentry/quant/.env
-
-# 2. 各命令 venv
-for cmd in q-seed q-fin q-news q-dashboard; do
-    cd ~/sentry/quant/$cmd
-    python3 -m venv .venv
-    .venv/bin/pip install -r requirements.txt
-done
-
-# 3. cron 6pm
-crontab -e
-# 加: 0 18 * * 1-5 /home/wyatt/sentry/quant/q-batch.sh
+git clone https://github.com/ocean5tech/sentry.git
+cd sentry/quant
+./deploy.sh          # 一键部署
 ```
 
-详见 [docs/USER_GUIDE_aux.md](./docs/USER_GUIDE_aux.md).
-
-## 维护
-
-私人项目, wooyoo@gmail.com.
+详细文档：
+- **[部署指南 + 密钥配置](DEPLOY.md)**
+- **[CLI 参数手册](docs/CLI_REFERENCE.md)**
+- **[配置文件指南](docs/CONFIG_GUIDE.md)**
+- [q-seed 用户手册](docs/USER_GUIDE_q-seed.md)
+- [q-fin 用户手册](docs/USER_GUIDE_q-fin.md)
+- [q-news 用户手册](docs/USER_GUIDE_q-news.md)
+- [q-backtest 用户手册](docs/USER_GUIDE_q-backtest.md)
