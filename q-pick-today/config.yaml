@@ -2,12 +2,19 @@
 
 # 模板列表 (litong 已停用 — 用户决定: 太多符合无区分度)
 templates:
-  - yunnange  # 80d 胜率 78%, 平均 +31%
-  - lanqi     # 80d 胜率 55%, 平均 +17%
-  - hongjing  # 80d 胜率 47%, 平均 +13%
-  - fujing    # 80d 胜率 47%, 平均 +21%
-  - xiangnong # 80d 胜率 38%, 平均 +8%
-  # - litong  # 已停用
+  - yunnange   # 80d 胜率 78%, 平均 +31%
+  - lanqi      # 80d 胜率 55%, 平均 +17%
+  - hongjing   # 80d 胜率 56%, 平均 +19% (dist<5)
+  - fujing     # 80d 胜率 49%, 平均 +31%
+  - xiangnong  # 80d 胜率 89%, 平均 +61% (dist<5, n小)
+  # - litong   # 已停用
+
+# 科创/创业板平台突破策略 (新增，替代 litong)
+kechuang:
+  enabled: true
+  strategy: "kechuang_breakout"   # core/strategies/kechuang_breakout.py
+  min_score: 4                    # 最低评分 (3=基础, 4=低振幅/强放量)
+  top_n: 5                        # 每次最多推送 N 只
 
 # 数据路径
 data:

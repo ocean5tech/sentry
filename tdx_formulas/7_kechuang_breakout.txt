@@ -1,0 +1,77 @@
+{通达信选股公式 - 科创/创业板平台突破策略}
+{模板: 品高股份(688227) / 寒武纪(688256) / 源杰科技(688498)}
+{适用: 科创板(688开头) / 创业板(300/301开头)}
+{模式: 规则引擎 (不用KNN)}
+
+{------ 回测说明 -----------------------------------------------------
+  策略逻辑: 上市后进入低振幅横盘整理 → 放量突破横盘区间上沿
+  品高股份验证: 2022-11-15命中(突破+4.3% 量比5.4)，3天后正式启动
+  寒武纪验证:   2022-09-02命中(突破+14% 量比4.6)，后续上涨数百%
+  持仓建议: 突破日 T+1 收盘入场，止损 -7%，目标 +30~50%（3-6个月）
+  注意: 科创/创业板科技股弹性大，止损要严格执行
+--------------------------------------------------------------------}
+
+{==================== 参数 ====================}
+PLATFORM_WIN:=60;         {平台期观察窗口: 60天}
+MAX_AMP:=0.30;            {平台最大振幅: 30%}
+VOL_MUL:=1.5;             {突破放量倍数: 1.5倍20日均量}
+BREAKOUT_MARGIN:=0.01;    {突破需超出平台上沿至少1%}
+
+{==================== 成交量基准 ====================}
+V_MA20:=REF(MA(V,20),1);  {前一日起的20日均量}
+
+{==================== 今日是否起爆 ====================}
+LAUNCH:=(C-REF(C,1))/REF(C,1)>=0.05 AND V>V_MA20*2 AND V_MA20>0;
+
+{==================== 平台期计算 ====================}
+{最近 PLATFORM_WIN 根K线（不含今天）}
+PLAT_HIGH:=REF(HHV(C,PLATFORM_WIN),1);   {平台上沿: 前60天最高收盘}
+PLAT_LOW :=REF(LLV(C,PLATFORM_WIN),1);   {平台下沿: 前60天最低收盘}
+
+{平台振幅}
+AMPLITUDE:=(PLAT_HIGH-PLAT_LOW)/(PLAT_LOW+0.01);
+
+{平台是否平坦（振幅 < 30%）}
+IS_PLATFORM:=AMPLITUDE<MAX_AMP AND PLAT_LOW>0;
+
+{==================== 平台MA斜率（过滤下跌途中的假平台）====================}
+MA20_START:=REF(MA(C,20),PLATFORM_WIN);   {平台期开始时的MA20}
+MA20_END  :=REF(MA(C,20),1);              {平台期结束时的MA20}
+{斜率: 平台期内MA20涨跌幅 / 60天 >= -3%（不是明显下跌）}
+SLOPE_OK:=(MA20_END-MA20_START)/MA20_START/PLATFORM_WIN>=-0.003;
+
+{==================== 突破条件 ====================}
+{收盘突破平台上沿 + 超出1%确认}
+BREAKOUT_PRICE:=PLAT_HIGH*(1+BREAKOUT_MARGIN);
+IS_BREAKOUT:=C>=BREAKOUT_PRICE;
+
+{放量确认}
+VOL_OK:=V>=V_MA20*VOL_MUL;
+
+{==================== 综合信号 ====================}
+BASE_COND:=IS_PLATFORM AND SLOPE_OK AND IS_BREAKOUT AND VOL_OK;
+
+{额外加分条件}
+STRONG_PLAT:=AMPLITUDE<0.15;              {极低振幅(<15%) 更强信号}
+STRONG_VOL :=V>=V_MA20*2.0;              {强放量(>=2倍)}
+
+{==================== 选股输出 ====================}
+XG:BASE_COND AND NOT(NAMELIKE('ST') OR NAMELIKE('*ST'));
+
+{==================== 指标标注（用作技术指标图）====================}
+{平台上沿参考线}
+PLAT_TOP:PLAT_HIGH,COLORRED,DOTLINE;
+
+{平台下沿参考线}
+PLAT_BOT:PLAT_LOW,COLORGREEN,DOTLINE;
+
+{买入信号标注}
+STICKLINE(BASE_COND,L*0.92,L*0.99,5,0),COLORRED;
+DRAWTEXT(BASE_COND,L*0.90,'★平台突破'),COLORRED;
+DRAWTEXT(BASE_COND,L*0.87,'T+1入场 止损-7%'),COLORYELLOW;
+DRAWTEXT(STRONG_PLAT AND BASE_COND,H*1.02,'极低振幅'),COLORCYAN;
+DRAWTEXT(STRONG_VOL AND BASE_COND,H*1.04,'强放量'),COLORMAGENTA;
+
+{成交量倍数副图}
+VOL_RATIO:V/V_MA20,COLORGREEN,STICK;
+REFLINE:VOL_MUL,COLORRED,DOTLINE;

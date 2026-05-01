@@ -99,7 +99,10 @@ def run_strategy_scan(
             df = load_daily(symbol)
             if df.empty or not _is_fresh(df):
                 continue
-            result = strategy_mod.scan(df)
+            # 若策略 scan() 接受 symbol 参数则传入（向后兼容）
+            import inspect as _inspect
+            _params = _inspect.signature(strategy_mod.scan).parameters
+            result = strategy_mod.scan(df, symbol=symbol) if "symbol" in _params else strategy_mod.scan(df)
             if result is None or result["score"] < min_score:
                 continue
             last = df.iloc[-1]
