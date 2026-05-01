@@ -97,12 +97,16 @@ def latest_qnews(scan_date: str) -> list[dict]:
 def is_kechuang(code: str) -> bool:
     return code.startswith(("688", "300", "301"))
 
-def star_badge(stars: str) -> str:
-    n = stars.count("★") if stars else 0
-    cls = "star4" if n >= 4 else ("star3" if n >= 3 else "star2")
-    return f"<span class='{cls}'>{stars}</span>" if stars else ""
+def star_text(stars: str) -> str:
+    """纯文本星级，用于 expander 标题"""
+    return stars if stars else ""
+
+def pct_text(v: float) -> str:
+    """纯文本涨跌，用于 expander 标题"""
+    return f"{v:+.1f}%"
 
 def pct_html(v: float) -> str:
+    """HTML 带色涨跌，用于 expander 内容"""
     s = f"{v:+.1f}%"
     return f"<span class='up'>{s}</span>" if v > 0 else (f"<span class='down'>{s}</span>" if v < 0 else s)
 
@@ -213,8 +217,8 @@ with left:
             liner= (v.get("one_liner") or "")[:40]
             entry= (v.get("entry_suggestion") or "")[:35]
 
-            label = (f"{star_badge(stars)} **{name}({code})** "
-                     f"¥{price} {pct_html(ret20)} | {liner}")
+            label = (f"{star_text(stars)} {name}({code}) "
+                     f"¥{price} {pct_text(ret20)} | {liner}")
             with st.expander(label, expanded=False):
                 # 风险
                 risks = v.get("key_risks") or []
@@ -261,11 +265,11 @@ with left:
             price= k.get("current_price","-")
             liner= (v.get("one_liner") or "")[:38]
 
-            label = (f"[{exch}] {star_badge(stars)} **{name}({code})** "
-                     f"¥{price} 5日{pct_html(ret5)} | {liner}")
+            label = (f"[{exch}] {star_text(stars)} {name}({code}) "
+                     f"¥{price} 5日{pct_text(ret5)} | {liner}")
             with st.expander(label, expanded=False):
                 c1, c2 = st.columns(2)
-                c1.markdown(f"**20日** {pct_html(ret20)}", unsafe_allow_html=True)
+                c1.markdown(f"**20日** {pct_text(ret20)}")
                 c2.markdown(f"**入场** {(v.get('entry_suggestion') or '-')[:30]}")
                 risks = v.get("key_risks") or []
                 if risks:
@@ -373,7 +377,7 @@ with right:
         for r in ipos:
             code = r.get("code","")
             chg  = r.get("change_pct",0)
-            label = f"**{r.get('name',code)}({code})** {r.get('market','')} {pct_html(chg)}"
+            label = f"{r.get('name',code)}({code}) {r.get('market','')} {pct_text(chg)}"
             with st.expander(label, expanded=False):
                 c1, c2, c3 = st.columns(3)
                 c1.metric("发行价", f"¥{r.get('ipo_price','-')}")
