@@ -1,479 +1,400 @@
 """
-q-dashboard: 华尔街金融页面风格的 q-* 结果展示
-读 q-seed/q-fin/q-news 的 logs/*.jsonl, 按交易日筛选, 4 个 tab.
+q-dashboard: 4个板块
+  1. 形态选股  — q-seed + q-fin 推荐结果
+  2. 公告热点  — q-news 今日题材 + 原始链接
+  3. 科创突破  — 科创/创业板平台突破 q-fin 分析
+  4. 新股      — 近 7 天上市新股列表
 """
-
 import json
-import os
 import re
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 import yaml
 
-ROOT = Path(__file__).parent
-CFG = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+ROOT = Path(__file__).parent.parent
+CFG  = yaml.safe_load((Path(__file__).parent / "config.yaml").read_text(encoding="utf-8"))
+CACHE_DIR = ROOT / "logs" / "daily_cache"
+
+sys.path.insert(0, str(ROOT))
+
+st.set_page_config(page_title="福宝抓股", page_icon="📈", layout="wide",
+                   initial_sidebar_state="expanded")
+
+st.markdown("""<style>
+.main,[data-testid="stSidebar"]{font-family:'SF Mono','Roboto Mono',monospace}
+[data-testid="stMetricValue"]{font-size:2rem;color:#FFD700;font-weight:700}
+[data-testid="stMetricLabel"]{color:#8B949E;font-size:.75rem;text-transform:uppercase;letter-spacing:.1rem}
+h1,h2,h3{color:#E8E9EB;font-weight:600}
+h1{border-bottom:1px solid #FFD700;padding-bottom:.4rem}
+[data-baseweb="tab"][aria-selected="true"]{color:#FFD700!important;border-bottom-color:#FFD700!important}
+.stDataFrame{font-family:monospace;font-size:.88rem}
+.tag{display:inline-block;background:#1E2329;border:1px solid #444;color:#ccc;
+     padding:.15rem .5rem;border-radius:3px;font-size:.75rem;margin:.1rem}
+.up{color:#00D4AA;font-weight:600}.down{color:#FF4757;font-weight:600}
+.chip{display:inline-block;background:#1E2329;border:1px solid #FFD700;color:#FFD700;
+      padding:.2rem .7rem;border-radius:4px;font-weight:600;margin-right:.4rem}
+</style>""", unsafe_allow_html=True)
 
 
-# ─────── 页面配置 + CSS 美化 ────────────────────────────────
-st.set_page_config(
-    page_title="Quant Dashboard",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-st.markdown("""
-<style>
-    /* 金融感 typography */
-    .main, [data-testid="stSidebar"] {
-        font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-    }
-
-    /* 数字突出 */
-    [data-testid="stMetricValue"] {
-        font-size: 2.2rem;
-        color: #FFD700;
-        font-weight: 700;
-        font-family: 'SF Mono', monospace;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #8B949E;
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.1rem;
-    }
-    [data-testid="stMetricDelta"] {
-        color: #00D4AA;
-    }
-
-    /* 标题 */
-    h1, h2, h3 {
-        color: #E8E9EB;
-        font-weight: 600;
-        letter-spacing: 0.05rem;
-    }
-    h1 {
-        border-bottom: 1px solid #FFD700;
-        padding-bottom: 0.5rem;
-    }
-
-    /* tab 样式 */
-    [data-baseweb="tab"] {
-        font-weight: 600;
-        font-family: monospace;
-        letter-spacing: 0.05rem;
-    }
-    [data-baseweb="tab"][aria-selected="true"] {
-        color: #FFD700 !important;
-        border-bottom-color: #FFD700 !important;
-    }
-
-    /* dataframe 表格 */
-    .stDataFrame {
-        font-family: monospace;
-        font-size: 0.9rem;
-    }
-
-    /* json 块 */
-    .stJson {
-        background-color: #0A0E13 !important;
-        border-left: 3px solid #FFD700;
-    }
-
-    /* 涨跌色 */
-    .up { color: #00D4AA; font-weight: 600; }
-    .down { color: #FF4757; font-weight: 600; }
-    .neutral { color: #8B949E; }
-
-    /* 交易日 chip */
-    .day-chip {
-        display: inline-block;
-        background: #1E2329;
-        border: 1px solid #FFD700;
-        color: #FFD700;
-        padding: 0.3rem 0.8rem;
-        border-radius: 4px;
-        font-family: monospace;
-        font-weight: 600;
-        margin-right: 0.5rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-
-# ─────── 数据加载 ───────────────────────────────────────────
-@st.cache_data(ttl=60)
-def list_log_files(log_dir: str) -> pd.DataFrame:
-    """扫一个 logs 目录, 返回 (file, scan_date, top_n, mtime) 的 DataFrame."""
-    p = Path(log_dir)
-    if not p.exists():
-        return pd.DataFrame(columns=["file", "scan_date", "top_n", "mtime"])
-    rows = []
-    for f in p.glob("q-*_top*_*.jsonl"):
-        m = re.match(r"q-(seed|fin|news)_top(\d+)_(\d{8})_(\d{4})\.jsonl", f.name)
-        if not m:
-            continue
-        cmd, top_n, ymd, hm = m.groups()
-        scan_date = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:8]}"
-        rows.append({
-            "file": str(f),
-            "name": f.name,
-            "cmd": cmd,
-            "scan_date": scan_date,
-            "top_n": int(top_n),
-            "mtime": f.stat().st_mtime,
-            "ts": f"{ymd}_{hm}",
-        })
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.sort_values("ts", ascending=False)
-    return df
-
+# ── 工具函数 ────────────────────────────────────────────────────
 
 @st.cache_data(ttl=60)
 def load_jsonl(path: str) -> list[dict]:
     out = []
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    out.append(json.loads(line))
-    except Exception as e:
-        st.error(f"读 {path} 失败: {e}")
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                out.append(json.loads(line))
+    except Exception:
+        pass
     return out
 
 
 @st.cache_data(ttl=60)
-def load_cost_log(path: str) -> pd.DataFrame:
-    """cost_log.jsonl → DataFrame."""
-    rows = []
-    p = Path(path)
-    if not p.exists():
-        return pd.DataFrame()
+def load_json(path: str) -> list:
     try:
-        with open(p, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except Exception:
-                    pass
+        return json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception:
-        return pd.DataFrame()
-    if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows)
-    df["ts"] = pd.to_datetime(df["ts"], unit="s")
-    df["date"] = df["ts"].dt.strftime("%Y-%m-%d")
-    return df
+        return []
 
 
-@st.cache_data(ttl=86400)
-def get_trading_days() -> set[str]:
-    """从 q-* logs 的 scan_date 集合派生交易日 (无需 akshare). 简化方案."""
+@st.cache_data(ttl=120)
+def latest_qfin_file(scan_date: str) -> str | None:
+    """找当天最新的 q-fin JSONL 文件"""
+    log_dir = Path(CFG["paths"]["q_fin_logs"])
+    ymd = scan_date.replace("-", "")
+    matches = sorted(log_dir.glob(f"q-fin_top*_{ymd}_*.jsonl"), reverse=True)
+    return str(matches[0]) if matches else None
+
+
+@st.cache_data(ttl=120)
+def latest_qnews_file(scan_date: str) -> str | None:
+    log_dir = Path(CFG["paths"]["q_news_logs"])
+    ymd = scan_date.replace("-", "")
+    matches = sorted(log_dir.glob(f"q-news_top*_{ymd}_*.jsonl"), reverse=True)
+    return str(matches[0]) if matches else None
+
+
+@st.cache_data(ttl=120)
+def all_qfin_today(scan_date: str) -> list[dict]:
+    """合并当天所有 q-fin 文件，按 score 去重"""
+    log_dir = Path(CFG["paths"]["q_fin_logs"])
+    ymd = scan_date.replace("-", "")
+    best: dict[str, dict] = {}
+    for f in log_dir.glob(f"q-fin_top*_{ymd}_*.jsonl"):
+        for r in load_jsonl(str(f)):
+            code = r.get("code")
+            if code and r.get("score", 0) >= best.get(code, {}).get("score", -1):
+                best[code] = r
+    return sorted(best.values(), key=lambda x: x.get("score", 0), reverse=True)
+
+
+def is_kechuang(code: str) -> bool:
+    return code.startswith(("688", "300", "301"))
+
+
+def star_color(stars: str) -> str:
+    n = stars.count("★") if stars else 0
+    if n >= 4: return "🟢"
+    if n >= 3: return "🟡"
+    return "🔴"
+
+
+def cninfo_url(code: str) -> str:
+    return f"http://www.cninfo.com.cn/new/disclosure/stock?stockCode={code}"
+
+
+def available_dates() -> list[str]:
     days = set()
-    for cmd in ("seed", "fin", "news"):
-        df = list_log_files(CFG["paths"][f"q_{cmd}_logs"])
-        if not df.empty:
-            days.update(df["scan_date"].unique().tolist())
-    return days
+    for cmd in ("q_fin_logs", "q_news_logs"):
+        p = Path(CFG["paths"][cmd])
+        if p.exists():
+            for f in p.glob("*.jsonl"):
+                m = re.search(r"(\d{8})", f.name)
+                if m:
+                    d = m.group(1)
+                    days.add(f"{d[:4]}-{d[4:6]}-{d[6:]}")
+    # 也把有 ipo cache 的日期加进来
+    if CACHE_DIR.exists():
+        for f in CACHE_DIR.glob("ipo_*.json"):
+            d = f.stem[4:]  # ipo_20260501 → 20260501
+            days.add(f"{d[:4]}-{d[4:6]}-{d[6:]}")
+    return sorted(days, reverse=True) or [str(date.today())]
 
 
-# ─────── Sidebar: 日期选择 ──────────────────────────────────
+# ── Sidebar ──────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 📅 交易日")
-    days = sorted(get_trading_days(), reverse=True)
-    if not days:
-        st.warning("无 logs, 先跑 q-seed/q-fin/q-news")
-        st.stop()
-
-    # URL ?date=2026-04-27 自动选
-    qp = st.query_params
-    default_date = qp.get("date", days[0])
-    try:
-        default_idx = days.index(default_date) if default_date in days else 0
-    except ValueError:
-        default_idx = 0
-
-    selected_date = st.selectbox(
-        "选日期",
-        days,
-        index=default_idx,
-        format_func=lambda d: d,
-    )
-    # 同步 URL
-    st.query_params["date"] = selected_date
+    st.markdown("### 📅 日期")
+    days = available_dates()
+    qp   = st.query_params
+    default = qp.get("date", days[0])
+    idx  = days.index(default) if default in days else 0
+    sel  = st.selectbox("选日期", days, index=idx)
+    st.query_params["date"] = sel
 
     st.markdown("---")
-    st.markdown("### 🛠 快捷")
-    if st.button("🔄 刷新 cache"):
+    if st.button("🔄 刷新"):
         st.cache_data.clear()
         st.rerun()
-
     st.markdown("---")
-    st.markdown("### 📁 路径")
-    for k, v in CFG["paths"].items():
-        st.caption(f"`{k}`: `{v[-30:]}`")
+    st.caption("福宝抓股 · Quant Dashboard")
+
+st.markdown(f"# 📈 福宝抓股 <span class='chip'>{sel}</span>", unsafe_allow_html=True)
+
+tab1, tab2, tab3, tab4 = st.tabs(["🌱 形态选股", "📰 公告热点", "🚀 科创突破", "🆕 新股"])
 
 
-# ─────── 顶部标题 ───────────────────────────────────────────
-st.markdown(f"# 📈 Quant Dashboard <span class='day-chip'>{selected_date}</span>", unsafe_allow_html=True)
-
-
-# ─────── 4 个 tab ───────────────────────────────────────────
-tab_overview, tab_seed, tab_fin, tab_news = st.tabs([
-    "📊 OVERVIEW",
-    "🌱 Q-SEED",
-    "💼 Q-FIN",
-    "📰 Q-NEWS",
-])
-
-
-# ───── TAB 1: OVERVIEW ─────
-with tab_overview:
-    col1, col2, col3, col4 = st.columns(4)
-
-    # 各命令的最新 jsonl 文件
-    n_seed = n_fin = n_news = 0
-    fin_cost = 0.0
-    news_cost = 0.0
-
-    for cmd, col, label in [
-        ("seed", col1, "Q-SEED"),
-        ("fin", col2, "Q-FIN"),
-        ("news", col3, "Q-NEWS"),
-    ]:
-        files = list_log_files(CFG["paths"][f"q_{cmd}_logs"])
-        if not files.empty:
-            today = files[files["scan_date"] == selected_date]
-            if not today.empty:
-                latest = today.iloc[0]
-                records = load_jsonl(latest["file"])
-                n = len(records)
-                if cmd == "seed": n_seed = n
-                elif cmd == "fin": n_fin = n
-                elif cmd == "news": n_news = n
-                col.metric(label, f"{n}", f"top {latest['top_n']}")
-            else:
-                col.metric(label, "—", "今日无")
-        else:
-            col.metric(label, "—", "无数据")
-
-    # token 总成本
-    fin_cost_df = load_cost_log(CFG["paths"]["q_fin_cost_log"])
-    if not fin_cost_df.empty:
-        today_cost = fin_cost_df[fin_cost_df["date"] == selected_date]["cost_usd"].sum()
-        month = selected_date[:7]
-        month_cost = fin_cost_df[fin_cost_df["date"].str.startswith(month)]["cost_usd"].sum()
-        col4.metric("TOKEN 花费", f"${today_cost:.4f}", f"月累计 ${month_cost:.2f}")
+# ════════════════════════════════════════════════════════════════
+# TAB 1  形态选股
+# ════════════════════════════════════════════════════════════════
+with tab1:
+    records = [r for r in all_qfin_today(sel) if not is_kechuang(r.get("code",""))]
+    if not records:
+        st.info(f"{sel} 无形态选股数据（q-pick-today 还未运行？）")
     else:
-        col4.metric("TOKEN 花费", "$0.00", "无数据")
+        # 汇总表
+        rows = []
+        for r in records:
+            v = r.get("verdict") or {}
+            k = r.get("kline") or {}
+            rows.append({
+                "代码": r.get("code"), "名称": r.get("name"),
+                "score": r.get("score"), "评级": v.get("stars",""),
+                "一句话": (v.get("one_liner") or "")[:35],
+                "现价": k.get("current_price"), "20日%": f"{(k.get('ret20') or 0)*100:+.1f}",
+                "入场建议": (v.get("entry_suggestion") or "")[:25],
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    st.markdown("---")
-    st.markdown("### 🕐 执行履历")
+        st.markdown("### 🔍 详情")
+        for r in records:
+            v   = r.get("verdict") or {}
+            er  = r.get("entity_research") or {}
+            k   = r.get("kline") or {}
+            code = r.get("code","")
+            title = f"{star_color(v.get('stars',''))} **{r.get('name','')} ({code})** — score={r.get('score')} {v.get('stars','')}"
+            with st.expander(title):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("现价", f"¥{k.get('current_price','-')}")
+                c2.metric("20日涨幅", f"{(k.get('ret20') or 0)*100:+.1f}%")
+                c3.metric("60日涨幅", f"{(k.get('ret60') or 0)*100:+.1f}%")
 
-    # 列出当日所有 logs 文件 (执行履历)
-    timeline = []
-    for cmd in ("seed", "fin", "news"):
-        files = list_log_files(CFG["paths"][f"q_{cmd}_logs"])
-        if not files.empty:
-            today = files[files["scan_date"] == selected_date]
-            for _, row in today.iterrows():
-                timeline.append({
-                    "时间": row["ts"][9:11] + ":" + row["ts"][11:],
-                    "命令": f"q-{cmd}",
-                    "TOP N": row["top_n"],
-                    "文件": row["name"],
-                })
-    if timeline:
-        st.dataframe(
-            pd.DataFrame(timeline).sort_values("时间"),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info(f"{selected_date} 当日无执行记录")
+                st.markdown(f"**结论**: {v.get('one_liner','-')}")
+                st.markdown(f"**入场**: {v.get('entry_suggestion','-')}")
+                if v.get("key_risks"):
+                    st.markdown("**风险**: " + " | ".join(v["key_risks"][:3]))
+                if v.get("themes"):
+                    for t in v["themes"]:
+                        st.markdown(f"<span class='tag'>{t}</span>", unsafe_allow_html=True)
 
-    # 月度成本曲线
-    if not fin_cost_df.empty:
-        st.markdown("### 💰 Token 成本 (近 30 天)")
-        last_30 = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        recent = fin_cost_df[fin_cost_df["date"] >= last_30]
-        if not recent.empty:
-            daily = recent.groupby("date")["cost_usd"].sum().reset_index()
-            st.bar_chart(daily.set_index("date"), use_container_width=True)
-
-
-# ───── 公用: 选当日最新文件 ─────
-def latest_file_for(cmd: str, scan_date: str) -> dict | None:
-    files = list_log_files(CFG["paths"][f"q_{cmd}_logs"])
-    if files.empty:
-        return None
-    today = files[files["scan_date"] == scan_date]
-    if today.empty:
-        return None
-    return today.iloc[0].to_dict()
-
-
-# ───── TAB 2: Q-SEED ─────
-with tab_seed:
-    latest = latest_file_for("seed", selected_date)
-    if not latest:
-        st.info(f"{selected_date} 无 q-seed 输出")
-    else:
-        st.caption(f"📁 {latest['name']} · TOP {latest['top_n']}")
-        records = load_jsonl(latest["file"])
-        if not records:
-            st.warning("文件为空")
-        else:
-            # 表格
-            rows = []
-            for r in records:
-                rows.append({
-                    "rank": r.get("rank"),
-                    "code": r.get("code"),
-                    "name": r.get("name"),
-                    "score": r.get("score"),
-                    "templates": ",".join(r.get("templates_matched", [])),
-                    "best_template": r.get("best_template"),
-                    "best_dist": r.get("best_dist"),
-                    "kline_safety": (r.get("kline") or {}).get("kline_safety", ""),
-                })
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-            # 详情展开
-            st.markdown("### 🔍 详情 (点击展开)")
-            for r in records:
-                with st.expander(f"#{r['rank']} {r.get('code')} {r.get('name')} (dist={r.get('best_dist')})"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Details**")
-                        st.json(r.get("details", {}))
-                    with col2:
-                        st.markdown("**Kline 快照**")
-                        st.json(r.get("kline", {}))
-
-
-# ───── TAB 3: Q-FIN ─────
-with tab_fin:
-    latest = latest_file_for("fin", selected_date)
-    if not latest:
-        st.info(f"{selected_date} 无 q-fin 输出")
-    else:
-        st.caption(f"📁 {latest['name']} · TOP {latest['top_n']}")
-        records = load_jsonl(latest["file"])
-        if not records:
-            st.warning("文件为空")
-        else:
-            # 表格
-            rows = []
-            for r in records:
-                v = r.get("verdict") or {}
-                rows.append({
-                    "rank": r.get("rank"),
-                    "code": r.get("code"),
-                    "name": r.get("name"),
-                    "score": r.get("score"),
-                    "stars": v.get("stars", ""),
-                    "one_liner": (v.get("one_liner") or "")[:50],
-                    "yoy_ni": (r.get("fundamentals") or {}).get("yoy_net_profit"),
-                    "kline_safety": (r.get("kline") or {}).get("kline_safety", ""),
-                })
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-            # 详情
-            st.markdown("### 🔍 详情 (点击展开)")
-            for r in records:
-                v = r.get("verdict") or {}
-                er = r.get("entity_research") or {}
-                title = f"#{r['rank']} {r.get('code')} {r.get('name')} · score={r.get('score')} {v.get('stars','')}"
-                with st.expander(title):
-                    if v:
-                        st.markdown("**🏅 Verdict**")
-                        c1, c2 = st.columns(2)
-                        c1.metric("Rating", f"{v.get('rating', '-')}", v.get('theme_hardness', ''))
-                        c2.markdown(f"**入场建议**: {v.get('entry_suggestion', '-')}")
-                        st.markdown(f"**结论**: {v.get('one_liner', '-')}")
-                        if v.get("key_risks"):
-                            st.markdown("**风险**:")
-                            for r2 in v["key_risks"]:
-                                st.markdown(f"- {r2}")
-
-                    if er and er.get("chain"):
-                        st.markdown("**🕸 Entity Research Chain**")
+                if er.get("chain"):
+                    with st.expander("🕸 股东实体研究链"):
                         st.json(er["chain"])
-                    elif er:
-                        st.json(er)
 
-                    st.markdown("**📊 Layer 2 数据**")
-                    cols = st.columns(3)
-                    cols[0].markdown("**Layer 1 触发**")
-                    cols[0].json(r.get("layer1_triggers", {}))
-                    cols[1].markdown("**Shareholders**")
-                    cols[1].json((r.get("shareholders") or {}).get("major_new_entry") or {})
-                    cols[2].markdown("**Fundamentals**")
-                    cols[2].json(r.get("fundamentals") or {})
+                f_data = r.get("fundamentals") or {}
+                ann    = r.get("announcements_90d") or {}
+                co1, co2 = st.columns(2)
+                with co1:
+                    st.markdown("**基本面**")
+                    eps = f_data.get("eps")
+                    np_ = f_data.get("net_profit")
+                    if eps is not None:
+                        st.caption(f"EPS {eps:.3f} | 净利润 {np_/1e8:.2f}亿" if np_ else f"EPS {eps:.3f}")
+                with co2:
+                    st.markdown(f"**近期公告** (共{ann.get('total',0)}条)")
+                    for t in (ann.get("key_titles") or [])[:3]:
+                        st.caption(f"• {t.get('title','')[:40]}")
+                    st.markdown(f"[cninfo 公告页]({cninfo_url(code)})")
 
 
-# ───── TAB 4: Q-NEWS ─────
-with tab_news:
-    latest = latest_file_for("news", selected_date)
-    if not latest:
-        st.info(f"{selected_date} 无 q-news 输出")
+# ════════════════════════════════════════════════════════════════
+# TAB 2  公告热点
+# ════════════════════════════════════════════════════════════════
+with tab2:
+    path = latest_qnews_file(sel)
+    if not path:
+        st.info(f"{sel} 无 q-news 数据")
     else:
-        st.caption(f"📁 {latest['name']} · TOP {latest['top_n']}")
-        records = load_jsonl(latest["file"])
+        records = load_jsonl(path)
         if not records:
-            st.warning("文件为空")
+            st.warning("q-news 文件为空")
         else:
-            # 表格
+            # 汇总
             rows = []
             for r in records:
                 cs = r.get("concept_status") or {}
+                started = cs.get("已启动")
+                flag = "🔴启动" if started else ("🟢未启动" if started is False else "⚪")
                 rows.append({
-                    "rank": r.get("rank"),
-                    "code": r.get("code"),
-                    "name": r.get("name"),
-                    "score": r.get("score"),
-                    "concept": cs.get("concept"),
-                    "已启动": cs.get("已启动"),
-                    "active_pct": cs.get("active_pct"),
-                    "events": len(r.get("triggered_events", [])),
+                    "代码": r.get("code"), "名称": r.get("name"),
+                    "score": r.get("score"), "题材": cs.get("concept",""),
+                    "状态": flag, "触发事件数": len(r.get("triggered_events",[])),
                 })
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-            # 详情
-            st.markdown("### 🔍 详情 (点击展开)")
+            st.markdown("### 🔍 详情 + 原始链接")
             for r in records:
-                cs = r.get("concept_status") or {}
-                started_emoji = "🔴" if cs.get("已启动") else ("🟢" if cs.get("已启动") is False else "⚪")
-                title = f"#{r['rank']} {r.get('code') or '-'} {r.get('name','')} · {cs.get('concept','-')} {started_emoji}"
+                cs     = r.get("concept_status") or {}
+                code   = r.get("code") or ""
+                started = cs.get("已启动")
+                flag   = "🔴" if started else ("🟢" if started is False else "⚪")
+                title  = f"{flag} **{r.get('name','')} ({code})** · {cs.get('concept','-')} · score={r.get('score')}"
                 with st.expander(title):
-                    st.markdown(f"**Concept Status**: {cs.get('verdict', '-')}")
+                    st.markdown(f"**题材判断**: {cs.get('verdict', '-')}")
 
-                    st.markdown("**📰 Triggered Events**")
-                    for ev in r.get("triggered_events", []):
-                        st.markdown(f"---")
-                        st.markdown(f"**{ev.get('title', '')}** ({ev.get('source', '')})")
-                        rule = ev.get("rule") or {}
-                        st.caption(f"rule={rule.get('id')} · confidence={rule.get('confidence')} · direction={rule.get('direction')}")
+                    evs = r.get("triggered_events") or []
+                    if evs:
+                        st.markdown("**触发事件**")
+                    for ev in evs:
+                        src   = ev.get("source","")
+                        ev_title = ev.get("title","")
+                        url   = ev.get("url","") or ev.get("link","")
+                        rule  = ev.get("rule") or {}
+
+                        st.markdown("---")
+                        if url:
+                            st.markdown(f"**[{ev_title}]({url})** `{src}`")
+                        else:
+                            st.markdown(f"**{ev_title}** `{src}`")
+                            # 公告类 → 构造 cninfo 链接
+                            if code and src in ("cninfo", "akshare", "公告"):
+                                st.markdown(f"[查看 {code} 全部公告]({cninfo_url(code)})")
+
+                        st.caption(f"方向={rule.get('direction','-')} | 置信度={rule.get('confidence','-')}")
+
                         chain = ev.get("reasoning_chain") or []
                         if chain:
-                            st.markdown("**推理链**:")
-                            for step in chain:
-                                layer = step.get("layer", "?")
-                                t = step.get("type", "")
-                                content = step.get("content", "")
-                                weight = step.get("weight")
-                                w_str = f" `w={weight}`" if weight is not None else ""
-                                st.markdown(f"- L{layer} `{t}` → {content}{w_str}")
+                            with st.expander("推理链"):
+                                for step in chain:
+                                    l, t, c = step.get("layer","?"), step.get("type",""), step.get("content","")
+                                    w = step.get("weight")
+                                    st.markdown(f"- L{l} `{t}` → {c}" + (f" `w={w}`" if w else ""))
+
+                    if code:
+                        st.markdown(f"[📋 cninfo 公告页]({cninfo_url(code)})")
+
+
+# ════════════════════════════════════════════════════════════════
+# TAB 3  科创突破
+# ════════════════════════════════════════════════════════════════
+with tab3:
+    records = [r for r in all_qfin_today(sel) if is_kechuang(r.get("code",""))]
+    if not records:
+        st.info(f"{sel} 无科创/创业板突破数据（q-kechuang-batch 还未运行？）")
+    else:
+        rows = []
+        for r in records:
+            v = r.get("verdict") or {}
+            k = r.get("kline") or {}
+            exch = "科创板" if r.get("code","").startswith("688") else "创业板"
+            rows.append({
+                "交易所": exch, "代码": r.get("code"), "名称": r.get("name"),
+                "score": r.get("score"), "评级": v.get("stars",""),
+                "一句话": (v.get("one_liner") or "")[:35],
+                "现价": k.get("current_price"), "20日%": f"{(k.get('ret20') or 0)*100:+.1f}",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        st.markdown("### 🔍 详情")
+        for r in records:
+            v    = r.get("verdict") or {}
+            k    = r.get("kline") or {}
+            code = r.get("code","")
+            exch = "科创板" if code.startswith("688") else "创业板"
+            title = f"{star_color(v.get('stars',''))} **{r.get('name','')} ({code})** [{exch}] score={r.get('score')} {v.get('stars','')}"
+            with st.expander(title):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("现价", f"¥{k.get('current_price','-')}")
+                c2.metric("5日", f"{(k.get('ret5') or 0)*100:+.1f}%")
+                c3.metric("20日", f"{(k.get('ret20') or 0)*100:+.1f}%")
+
+                st.markdown(f"**突破结论**: {v.get('one_liner','-')}")
+                st.markdown(f"**操盘建议**: {v.get('entry_suggestion','-')}")
+                if v.get("key_risks"):
+                    st.markdown("**风险**: " + " | ".join(v["key_risks"][:3]))
+
+                ann = r.get("announcements_90d") or {}
+                st.markdown(f"**近 90 日公告** {ann.get('total',0)} 条")
+                for t in (ann.get("key_titles") or [])[:3]:
+                    st.caption(f"• {t.get('title','')[:45]}")
+                st.markdown(f"[📋 cninfo 公告页]({cninfo_url(code)})")
+
+                f_data = r.get("fundamentals") or {}
+                eps = f_data.get("eps")
+                np_ = f_data.get("net_profit")
+                if eps is not None:
+                    profit_str = f"{np_/1e8:.2f}亿" if np_ else "-"
+                    st.caption(f"EPS {eps:.3f} | 净利润 {profit_str}")
+
+
+# ════════════════════════════════════════════════════════════════
+# TAB 4  新股
+# ════════════════════════════════════════════════════════════════
+with tab4:
+    ymd = sel.replace("-", "")
+    ipo_path = CACHE_DIR / f"ipo_{ymd}.json"
+
+    if not ipo_path.exists():
+        st.info("新股数据未生成，运行: `python scripts/q-ipo-watch`")
+        if st.button("立即扫描新股"):
+            import subprocess
+            with st.spinner("扫描中..."):
+                subprocess.run([sys.executable, str(ROOT / "scripts/q-ipo-watch")],
+                               timeout=120)
+            st.cache_data.clear()
+            st.rerun()
+    else:
+        ipos = load_json(str(ipo_path))
+        if not ipos:
+            st.warning("近 7 天无新股上市")
+        else:
+            st.markdown(f"**近 7 天新股** · 共 {len(ipos)} 只")
+
+            rows = []
+            for r in ipos:
+                chg = r.get("change_pct", 0)
+                rows.append({
+                    "代码":      r.get("code"),
+                    "名称":      r.get("name"),
+                    "上市日期":  r.get("ipo_date"),
+                    "已上市天数": r.get("days_listed"),
+                    "发行价":    r.get("ipo_price"),
+                    "最新价":    r.get("last_price"),
+                    "涨跌幅%":   chg,
+                    "行业":      r.get("industry",""),
+                    "上市板":    r.get("market",""),
+                })
+
+            df = pd.DataFrame(rows)
+            st.dataframe(
+                df.style.applymap(
+                    lambda v: "color:#00D4AA" if isinstance(v, float) and v > 0
+                              else ("color:#FF4757" if isinstance(v, float) and v < 0 else ""),
+                    subset=["涨跌幅%"]
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.markdown("### 🔍 个股详情")
+            for r in ipos:
+                code = r.get("code","")
+                chg  = r.get("change_pct", 0)
+                chg_str = f"+{chg:.1f}%" if chg >= 0 else f"{chg:.1f}%"
+                color = "up" if chg >= 0 else "down"
+                title = f"**{r.get('name','')} ({code})** 上市 {r.get('ipo_date')} · <span class='{color}'>{chg_str}</span>"
+                with st.expander(title, unsafe_allow_html=True):
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("发行价", f"¥{r.get('ipo_price','-')}")
+                    c2.metric("最新价", f"¥{r.get('last_price','-')}")
+                    c3.metric("涨跌", chg_str)
+
+                    if r.get("industry"):
+                        st.caption(f"行业: {r['industry']}  |  板块: {r.get('market','')}")
+                    st.markdown(f"[📋 cninfo 公告页]({cninfo_url(code)})")
+                    st.markdown(f"[东方财富 行情](https://quote.eastmoney.com/{'sh' if code.startswith('6') else 'sz'}{code}.html)")

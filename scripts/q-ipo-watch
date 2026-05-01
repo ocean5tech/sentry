@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""
+q-ipo-watch: 扫描最近 N 天内上市的新股
+输出: logs/daily_cache/ipo_YYYYMMDD.json
+字段: code, name, ipo_date, ipo_price, last_price, change_pct, industry, concepts
+"""
+import json
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+
+ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT))
+
+from core.tdx_loader import list_tdx_symbols
+from core.data_loader import load_daily
+from core.stock_names import get_name
+
+WATCH_DAYS = 7   # 上市多少天以内算"新股"
+
+# A股正股前缀（排除ETF/债券/基金）
+_STOCK_PREFIXES = (
+    "000", "001", "002", "003",       # 深交所主板/中小板
+    "300", "301",                      # 创业板
+    "600", "601", "603", "605",        # 上交所主板
+    "688",                             # 科创板
+    "430", "830", "831", "832", "833", "834", "835",  # 北交所
+)
+
+
+def scan_ipos(watch_days: int = WATCH_DAYS) -> list[dict]:
+    cutoff = date.today() - timedelta(days=watch_days)
+    symbols = list_tdx_symbols()
+    results = []
+
+    symbols = [s for s in symbols if s.startswith(_STOCK_PREFIXES)]
+    for code in symbols:
+        try:
+            df = load_daily(code)
+            if df is None or len(df) < 1:
+                continue
+            ipo_row = df.iloc[0]
+            ipo_date = ipo_row["date"]
+            if hasattr(ipo_date, "date"):
+                ipo_date = ipo_date.date()
+            if ipo_date < cutoff:
+                continue  # 上市太久了，跳过
+
+            ipo_price = float(ipo_row["close"])
+            last_row  = df.iloc[-1]
+            last_price = float(last_row["close"])
+            change_pct = round((last_price / ipo_price - 1) * 100, 1) if ipo_price > 0 else 0
+
+            if code.startswith("688"):       mkt = "科创板"
+            elif code.startswith(("300","301")): mkt = "创业板"
+            elif code.startswith(("000","001","002","003","600","601","603","605")): mkt = "主板"
+            elif code.startswith(("43","83")):   mkt = "北交所"
+            else:                               mkt = ""
+
+            results.append({
+                "code":        code,
+                "name":        get_name(code) or code,
+                "ipo_date":    str(ipo_date),
+                "ipo_price":   round(ipo_price, 2),
+                "last_price":  round(last_price, 2),
+                "change_pct":  change_pct,
+                "days_listed": (date.today() - ipo_date).days,
+                "market":      mkt,
+                "industry":    "",
+            })
+        except Exception:
+            pass
+
+    results.sort(key=lambda x: x["ipo_date"], reverse=True)
+    return results
+
+
+def enrich_with_sector(results: list[dict]) -> list[dict]:
+    """用 baostock 补全缺失名称（走 TCP 绕过代理）"""
+    missing = [r for r in results if r["name"] == r["code"]]
+    if not missing:
+        return results
+    try:
+        import baostock as bs
+        bs.login()
+        for r in missing:
+            code = r["code"]
+            prefix = "sh" if code.startswith(("6", "688")) else "sz"
+            rs = bs.query_stock_basic(code=f"{prefix}.{code}")
+            while rs.error_code == "0" and rs.next():
+                row = rs.get_row_data()
+                if len(row) > 1 and row[1]:
+                    r["name"] = row[1]
+                break
+        bs.logout()
+    except Exception:
+        pass
+    return results
+
+
+if __name__ == "__main__":
+    today_str = date.today().strftime("%Y%m%d")
+    cache_dir = ROOT / "logs" / "daily_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_path  = cache_dir / f"ipo_{today_str}.json"
+
+    # 清理旧缓存
+    for old in cache_dir.glob("ipo_*.json"):
+        if today_str not in old.name:
+            old.unlink(missing_ok=True)
+
+    print(f"[q-ipo-watch] 扫描最近 {WATCH_DAYS} 天新股...")
+    results = scan_ipos(WATCH_DAYS)
+    print(f"[q-ipo-watch] 找到 {len(results)} 只新股，获取行业信息...")
+    results = enrich_with_sector(results)
+
+    out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[q-ipo-watch] 写入: {out_path}")
+
+    for r in results:
+        chg = f"{r['change_pct']:+.1f}%"
+        print(f"  {r['code']} {r['name']:<8} 上市{r['ipo_date']} "
+              f"发行价{r['ipo_price']:.2f} 现价{r['last_price']:.2f} {chg} {r.get('industry','')}")
