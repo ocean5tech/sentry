@@ -1,43 +1,65 @@
-"""三角旗（收敛旗形/Pennant）检测.
+"""三角旗（收敛旗形/Pennant）检测 — 宏景风格.
 
-高点趋势线下倾 + 低点趋势线上倾 → 收敛 → 即将起爆.
-采用多窗口扫描，自动找最近最收敛的形态段.
+必须同时满足:
+  1. 几何收敛: 高点趋势线下倾 + 低点趋势线上倾 + 当前价在通道内
+  2. 时长合理: 20~65 个交易日（1~3 个月）
+  3. MA20 稳健上升: slope > 0 且单调上升比 ≥ 60%
+  4. 低点单调递增: 摆动低点逐步抬高（至少 2/3 的相邻低点上升）
 """
 
 import numpy as np
 
-SWING_WIN = 2          # 局部极值窗口 (±N bars)，2 更敏感
-MIN_SWINGS = 2         # 最少摆动点数（高低点各不少于2个）
-APEX_MAX_FUTURE = 20   # apex 最多N天后（收敛尖端未到）
-APEX_MAX_PAST = 10     # apex 最多N天前（已穿过尖端）
+SWING_WIN = 2
+MIN_SWINGS = 2
+APEX_MAX_FUTURE = 25
+APEX_MAX_PAST = 10
 
-# 尝试的窗口尺寸（从短到长，取最新最收敛的）
+# 时长约束（交易日）
+MIN_WIN = 20
+MAX_WIN = 65
+
+# MA20 要求
+MA20_MIN_SLOPE = 0.0      # 斜率必须 > 0（上升）
+MA20_MIN_MONO = 0.60      # 单调上升比 ≥ 60%
+
+# 低点单调要求
+LOW_MIN_MONO = 0.67       # 相邻低点中至少 2/3 上升
+
 WINDOW_SIZES = [22, 28, 35, 45, 60]
 
 
 def _local_highs(H: np.ndarray, window: int = SWING_WIN) -> list[int]:
-    idxs = []
-    n = len(H)
-    for i in range(window, n - window):
-        if H[i] >= max(H[i - window: i + window + 1]):
-            idxs.append(i)
-    return idxs
+    return [i for i in range(window, len(H) - window)
+            if H[i] >= max(H[i - window: i + window + 1])]
 
 
 def _local_lows(L: np.ndarray, window: int = SWING_WIN) -> list[int]:
-    idxs = []
-    n = len(L)
-    for i in range(window, n - window):
-        if L[i] <= min(L[i - window: i + window + 1]):
-            idxs.append(i)
-    return idxs
+    return [i for i in range(window, len(L) - window)
+            if L[i] <= min(L[i - window: i + window + 1])]
 
 
-def _check_window(H, L, closes, dates_arr, n) -> dict | None:
-    """检测一个固定长度窗口是否形成三角旗. 成功返回结果 dict, 否则 None."""
+def _ma20_trend(C: np.ndarray):
+    """返回 (slope_pct_per_bar, monotone_ratio, ma_array)."""
+    n = len(C)
+    ma = np.array([np.mean(C[max(0, i - 19): i + 1]) for i in range(n)])
+    slope = float(np.polyfit(np.arange(n, dtype=float), ma, 1)[0])
+    slope_pct = slope / (float(np.mean(ma)) + 1e-9) * 100
+    rising = sum(1 for i in range(1, n) if ma[i] >= ma[i - 1])
+    mono = rising / max(n - 1, 1)
+    return slope_pct, mono, ma
+
+
+def _low_monotone(sl_prices: list[float]):
+    """返回相邻低点上升比例."""
+    if len(sl_prices) < 2:
+        return 0.0
+    rises = sum(1 for i in range(1, len(sl_prices)) if sl_prices[i] > sl_prices[i - 1])
+    return rises / (len(sl_prices) - 1)
+
+
+def _check_window(H, L, C, dates_arr, n) -> dict | None:
     sh = _local_highs(H)
     sl = _local_lows(L)
-
     if len(sh) < MIN_SWINGS or len(sl) < MIN_SWINGS:
         return None
 
@@ -45,37 +67,41 @@ def _check_window(H, L, closes, dates_arr, n) -> dict | None:
     coef_l = np.polyfit(sl, L[sl], 1)
     slope_h, slope_l = float(coef_h[0]), float(coef_l[0])
 
-    # 必须收敛: 高点下倾 + 低点上倾
     if slope_h >= 0 or slope_l <= 0:
         return None
 
-    # Apex
     denom = slope_h - slope_l
     if abs(denom) < 1e-10:
         return None
     apex_x = (coef_l[1] - coef_h[1]) / denom
     days_to_apex = int(round(apex_x - (n - 1)))
-
     if days_to_apex < -APEX_MAX_PAST or days_to_apex > APEX_MAX_FUTURE:
         return None
 
-    # 宽度压缩比
-    mid = float(np.mean(closes[-5:]))
+    mid = float(np.mean(C[-5:]))
     if mid <= 0:
         return None
     w0 = (float(np.polyval(coef_h, 0)) - float(np.polyval(coef_l, 0))) / mid
     wn = (float(np.polyval(coef_h, n - 1)) - float(np.polyval(coef_l, n - 1))) / mid
-
-    # 初始宽度必须 > 最终宽度（真正在收缩）
     if w0 <= 0 or wn <= 0 or wn >= w0:
         return None
 
-    # 当前价格必须在通道内 (否则已起爆/已跌破)
-    current_close = float(closes[-1])
+    # 当前价必须在通道内（允许轻微突破上沿 8%）
+    cur = float(C[-1])
     upper_now = float(np.polyval(coef_h, n - 1))
     lower_now = float(np.polyval(coef_l, n - 1))
-    # 允许轻微突破上沿5%（即将起爆的信号），但不能超出太多
-    if current_close > upper_now * 1.08 or current_close < lower_now * 0.92:
+    if cur > upper_now * 1.08 or cur < lower_now * 0.92:
+        return None
+
+    # MA20 稳健上升
+    ma_slope, ma_mono, _ = _ma20_trend(C)
+    if ma_slope <= MA20_MIN_SLOPE or ma_mono < MA20_MIN_MONO:
+        return None
+
+    # 低点单调递增
+    sl_prices = [float(L[i]) for i in sl]
+    low_mono = _low_monotone(sl_prices)
+    if low_mono < LOW_MIN_MONO:
         return None
 
     compression = round(wn / w0, 3)
@@ -89,27 +115,25 @@ def _check_window(H, L, closes, dates_arr, n) -> dict | None:
         "width_pct_now": round(wn * 100, 1),
         "width_pct_start": round(w0 * 100, 1),
         "near_breakout": abs(days_to_apex) <= 15,
+        "ma20_slope_pct": round(ma_slope, 4),
+        "ma20_mono": round(ma_mono, 2),
+        "low_mono": round(low_mono, 2),
         "pennant_start": str(dates_arr[0]) if dates_arr is not None else "",
         "pennant_end": str(dates_arr[-1]) if dates_arr is not None else "",
-        "_n_sh": len(sh),
-        "_n_sl": len(sl),
     }
 
 
 def detect_pennant(df) -> dict:
     """
-    多窗口扫描，返回最近最收敛的三角旗形态.
+    多窗口扫描，返回符合宏景风格的三角旗形态.
 
-    Returns dict:
-      detected       bool
-      slope_high     float  (<0 = 高点下倾)
-      slope_low      float  (>0 = 低点上倾)
-      days_to_apex   int    (正=收敛尖端在未来, 0/负=已穿过)
-      compression    float  (当前宽度/初始宽度, 越小越收敛)
-      width_pct_now  float  (当前通道宽度/价格%)
-      near_breakout  bool   (days_to_apex 绝对值 ≤ 7)
-      pennant_start  str    YYYY-MM-DD
-      pennant_end    str    YYYY-MM-DD
+    宏景风格要求:
+      - 几何收敛 (高点↓ 低点↑ 通道内)
+      - 时长 20~65 个交易日
+      - MA20 稳健上升 (slope>0, 单调比≥60%)
+      - 摆动低点单调递增 (相邻低点≥2/3 上升)
+
+    Returns dict: detected + metadata (see _check_window)
     """
     if df is None or len(df) < 25:
         return {"detected": False}
@@ -124,9 +148,9 @@ def detect_pennant(df) -> dict:
     C_all = df["close"].values.astype(float)
     total = len(df)
 
-    best = None
-    # 从最短窗口开始，最短窗口优先（最近的形态）
     for win in WINDOW_SIZES:
+        if win < MIN_WIN or win > MAX_WIN:
+            continue
         if total < win + 5:
             continue
         H = H_all[-win:]
@@ -135,14 +159,6 @@ def detect_pennant(df) -> dict:
         d = dates_str[-win:] if dates_str is not None else None
         res = _check_window(H, L, C, d, win)
         if res is not None:
-            # 取第一个（最短窗口）检测到的结果
-            best = res
-            break
+            return res
 
-    if best is None:
-        return {"detected": False}
-
-    # 清理内部调试字段
-    best.pop("_n_sh", None)
-    best.pop("_n_sl", None)
-    return best
+    return {"detected": False}
