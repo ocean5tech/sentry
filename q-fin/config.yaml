@@ -46,9 +46,10 @@ mode:
 
 # 递归实体调查 (--paid 启用)
 entity_research:
-  max_depth_standard: 2
-  max_depth_deep: 3
+  max_depth_standard: 3
+  max_depth_deep: 4
   fanout_per_layer: 2
+  use_reasoning_model: true   # entity research 用 verdict_model (R1/V4) 而非 V3
   budget_per_stock_usd: 0.10
   prefer_entity_hints: true
   min_shareholder_pct_for_research: 0.03
@@ -80,11 +81,11 @@ providers:
     deepseek:
       api_key_env: "DEEPSEEK_API_KEY"
       base_url: "https://api.deepseek.com/v1"
-      default_model: "deepseek-chat"       # V3, 通用任务
-      verdict_model: "deepseek-reasoner"   # R1, 深度调研/verdict (推理型)
+      default_model: "deepseek-v4-flash"   # V4-flash, 推理型，速度快，实体调查用
+      verdict_model: "deepseek-v4-pro"     # V4-pro, 推理型，最终评级/深度verdict用
       pricing:
-        default: {input: 0.27, output: 1.10}   # DeepSeek V3 标准价 ($/1M tokens)
-        verdict: {input: 0.55, output: 2.19}   # DeepSeek R1 标准价
+        default: {input: 0.27, output: 1.10}   # V4-flash 估算（待官方公布后更新）
+        verdict: {input: 0.55, output: 2.19}   # V4-pro 估算
     dummy:
       pricing: {default: {input: 0, output: 0}}
     dummy_priced:                # 带 mock pricing, 让 budget_guard 在离线测试可触发

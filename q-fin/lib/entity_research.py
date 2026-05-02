@@ -342,11 +342,15 @@ def research(
 
         # 4. LLM 调用
         prompt = _build_prompt(entity, evidence if not use_anthropic_tool else "")
+        # 使用推理模型做实体调查（config 里 use_reasoning_model=true 时用 verdict model）
+        er_model_kind = "verdict" if cfg.get("use_reasoning_model", True) else "default"
+        # 推理模型需要更大 max_tokens（思维链 + 最终输出）
+        er_max_tokens = 4000 if er_model_kind == "verdict" else 800
         try:
             resp = llm.chat(
                 prompt,
-                model_kind="default",
-                max_tokens=800,
+                model_kind=er_model_kind,
+                max_tokens=er_max_tokens,
                 tools=web_search_tool_spec,
             )
         except Exception as e:

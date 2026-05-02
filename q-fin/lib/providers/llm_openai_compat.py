@@ -1,17 +1,27 @@
-"""OpenAI 兼容 provider. 一个类覆盖 OpenAI / DeepSeek / Moonshot / 通义千问 / 豆包.
+"""OpenAI 兼容 provider. 覆盖 OpenAI / DeepSeek / Moonshot / 通义千问 / 豆包.
 区分靠 base_url + api_key_env + default_model. 用 openai SDK.
+
+DeepSeek 推理模型 (deepseek-reasoner / deepseek-v4-*) 使用 reasoning_content 字段,
+需要更大的 max_tokens (≥3000) 并从 reasoning_content 回退.
 """
 
 import os
 
 from .llm_base import LLMResponse
 
+# 推理模型标识 —— 这些模型有 reasoning_content 字段，需要大 max_tokens
+_REASONING_MODEL_PREFIXES = ("deepseek-reasoner", "deepseek-v4", "o1", "o3")
+
+
+def _is_reasoning_model(model_name: str) -> bool:
+    return any(model_name.startswith(p) for p in _REASONING_MODEL_PREFIXES)
+
 
 class OpenAICompatLLM:
     name = "openai_compat"
 
     def __init__(self, cfg: dict, provider_name: str = "openai_compat"):
-        self.name = provider_name   # 使用实际配置的 provider 名 (deepseek / openai_compat)
+        self.name = provider_name
         self.cfg = cfg
         api_key = os.environ.get(cfg.get("api_key_env", "OPENAI_API_KEY"))
         if not api_key:
@@ -30,17 +40,29 @@ class OpenAICompatLLM:
         p = self._pricing.get(pkey) or {"input": 0.5, "output": 2.0}
         return (input_tokens / 1_000_000) * p["input"] + (output_tokens / 1_000_000) * p["output"]
 
-    def chat(self, prompt: str, model_kind: str = "default", max_tokens: int = 1500, tools: list | None = None) -> LLMResponse:
-        # tools 参数当前未在 openai_compat 支持 (各 provider tool 协议不一)
-        # 调用方传 tools 时静默忽略, 让逻辑降级为纯文本 chat
+    def chat(self, prompt: str, model_kind: str = "default", max_tokens: int = 1500,
+             tools: list | None = None) -> LLMResponse:
         model = self._model_for(model_kind)
+
+        # 推理模型需要更大的 max_tokens（reasoning chain + final output）
+        if _is_reasoning_model(model):
+            max_tokens = max(max_tokens, 4000)
+
         resp = self._client.chat.completions.create(
             model=model,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = resp.choices[0].message.content or ""
-        in_tok = resp.usage.prompt_tokens
+
+        msg = resp.choices[0].message
+        # 推理模型: content 可能为空，回退到 reasoning_content 的最后部分
+        text = msg.content or ""
+        if not text and hasattr(msg, "reasoning_content") and msg.reasoning_content:
+            # reasoning_content 是思维链，取最后 800 字作为"结论"注入
+            rc = msg.reasoning_content
+            text = rc[-800:] if len(rc) > 800 else rc
+
+        in_tok  = resp.usage.prompt_tokens
         out_tok = resp.usage.completion_tokens
         cost = self.estimate_cost(in_tok, out_tok, model_kind)
         return LLMResponse(

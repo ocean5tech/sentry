@@ -1,8 +1,58 @@
-"""Layer 2 公告深挖. akshare stock_zh_a_disclosure_report_cninfo + 关键词分类."""
+"""Layer 2 公告深挖. akshare stock_zh_a_disclosure_report_cninfo + 关键词分类.
+对重要公告（控制权变更/重组/借壳）额外下载 PDF 正文片段供 LLM 参考.
+"""
 
 import re
 from datetime import date, datetime
 from typing import Any
+
+# PDF 解析：只对关键类别的公告下载，避免浪费时间
+_PDF_FETCH_CATEGORIES = {"控制权变更", "借壳重组", "主业转型", "跨界布局"}
+_PDF_MAX_CHARS = 3000   # 每份 PDF 最多提取的字符数
+_PDF_TIMEOUT   = 15     # 下载超时秒数
+
+
+def _cninfo_detail_to_pdf_url(detail_url: str) -> str:
+    """把 cninfo detail 页 URL 转换为直接 PDF 下载 URL.
+    格式: http://static.cninfo.com.cn/finalpage/{date}/{announcementId}.PDF
+    """
+    m = re.search(r'announcementId=(\d+).*announcementTime=(\d{4}-\d{2}-\d{2})', detail_url)
+    if not m:
+        return detail_url
+    ann_id, ann_date = m.group(1), m.group(2)
+    return f"http://static.cninfo.com.cn/finalpage/{ann_date}/{ann_id}.PDF"
+
+
+def _fetch_pdf_text(url: str) -> str:
+    """下载 PDF 并提取纯文本，最多返回 _PDF_MAX_CHARS 字符."""
+    if not url or not url.startswith("http"):
+        return ""
+    # cninfo detail 页 → 转为直接 PDF URL
+    if "cninfo.com.cn/new/disclosure/detail" in url:
+        url = _cninfo_detail_to_pdf_url(url)
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=_PDF_TIMEOUT) as r:
+            raw = r.read(600_000)   # 最多读 600KB（大约30页）
+        return _parse_pdf_bytes(raw)
+    except Exception as e:
+        return f"[PDF获取失败: {type(e).__name__}]"
+
+
+def _parse_pdf_bytes(data: bytes) -> str:
+    """用 pdfminer.six 从字节流提取文字."""
+    try:
+        import io
+        from pdfminer.high_level import extract_text_to_fp
+        from pdfminer.layout import LAParams
+        out = io.StringIO()
+        extract_text_to_fp(io.BytesIO(data), out, laparams=LAParams(), page_numbers=list(range(5)))
+        text = out.getvalue()
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:_PDF_MAX_CHARS]
+    except Exception as e:
+        return f"[PDF解析失败: {type(e).__name__}]"
 
 
 def _classify(title: str, kw_cfg: dict) -> tuple[str | None, list[str], list[str]]:
@@ -90,7 +140,11 @@ def analyze(code: str, since: str, until: str, kw_cfg: dict, ak_module, cache) -
             if h not in hot_keywords_hit:
                 hot_keywords_hit.append(h)
         if cat and cat in ("控制权变更", "借壳重组", "主业转型"):
-            key_titles.append({"date": ann["date"], "title": ann["title"], "category": cat})
+            entry = {"date": ann["date"], "title": ann["title"], "category": cat, "url": ann.get("url","")}
+            # 对关键公告下载 PDF 正文（前5页）
+            if cat in _PDF_FETCH_CATEGORIES and ann.get("url"):
+                entry["pdf_text"] = _fetch_pdf_text(ann["url"])
+            key_titles.append(entry)
 
         # risk flags
         title_low = ann["title"]

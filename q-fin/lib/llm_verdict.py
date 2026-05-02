@@ -70,10 +70,17 @@ def _summarize_record(rec: dict) -> str:
     ])
 
     ann = rec.get("announcements_90d") or {}
+    key_titles = []
+    for kt in (ann.get("key_titles") or [])[:5]:
+        entry = {"date": kt.get("date"), "title": kt.get("title"), "category": kt.get("category")}
+        # 纳入 PDF 正文片段（截短到 500 字）
+        if kt.get("pdf_text") and not str(kt["pdf_text"]).startswith("["):
+            entry["pdf_snippet"] = kt["pdf_text"][:500]
+        key_titles.append(entry)
     summary["announcements"] = {
         "total": ann.get("total"),
         "by_category": ann.get("by_category"),
-        "key_titles": (ann.get("key_titles") or [])[:5],
+        "key_titles": key_titles,
         "risk_flags": ann.get("risk_flags", []),
     }
 
