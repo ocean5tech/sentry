@@ -78,6 +78,44 @@ def _latest_report_date_candidates() -> list[str]:
     return [d for d in out if date.fromisoformat(d) <= today]
 
 
+def fetch_holder_count(code: str, ak_module, cache) -> dict:
+    """拉取近两期股东人数，计算环比变化."""
+    def _do():
+        try:
+            df = ak_module.stock_holder_num_em(symbol=code)
+            if df is None or df.empty:
+                return {"_err": "empty"}
+            date_col = next((c for c in ["截止日期", "报告日期", "日期"] if c in df.columns), None)
+            count_col = next((c for c in ["股东人数", "总股东人数"] if c in df.columns), None)
+            if not date_col or not count_col:
+                return {"_err": f"cols not found: {list(df.columns)}"}
+            df = df.sort_values(date_col, ascending=False).reset_index(drop=True)
+            rows = df[[date_col, count_col]].head(3).to_dict("records")
+            return {"rows": rows, "dc": date_col, "cc": count_col}
+        except Exception as e:
+            return {"_err": f"{type(e).__name__}: {e}"}
+
+    raw = cache.get_or_set("holder_count", (code,), _do)
+    if "_err" in raw:
+        return {"_err": raw["_err"]}
+    rows = raw.get("rows", [])
+    dc, cc = raw.get("dc"), raw.get("cc")
+    if len(rows) < 2:
+        return {"_err": "need 2+ periods"}
+    try:
+        cur = int(str(rows[0][cc]).replace(",", ""))
+        prev = int(str(rows[1][cc]).replace(",", ""))
+        chg_pct = round((cur - prev) / prev * 100, 1) if prev else None
+        return {
+            "holder_count_date": str(rows[0][dc])[:10],
+            "holder_count_current": cur,
+            "holder_count_prev": prev,
+            "holder_count_chg_pct": chg_pct,
+        }
+    except Exception as e:
+        return {"_err": f"parse: {e}"}
+
+
 def analyze(code: str, kw_cfg: dict, ak_module, cache) -> dict:
     """返回 shareholders schema. 失败 graceful 返回部分字段."""
     def _do():
@@ -157,13 +195,16 @@ def analyze(code: str, kw_cfg: dict, ak_module, cache) -> dict:
         r["pct"] for r in top10 if r.get("entity_type") == "国资"
     ), 2)
 
+    holder = fetch_holder_count(code, ak_module, cache)
+
     return {
         "report_date": rd,
         "top10_free": top10,
         "new_entries_count": new_entries_count,
         "top1_pct": top1_pct,
         "top10_concentration_pct": round(concentration, 2),
-        "state_owned_pct": state_owned_pct,          # 十大流通股东中国资合计持股%
+        "state_owned_pct": state_owned_pct,
         "major_new_entry": major,
+        "holder_count": holder,
         "_err": err,
     }

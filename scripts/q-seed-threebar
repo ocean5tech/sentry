@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# 三根红棍策略扫描: 找到日线中3根均匀大阳 (≥8%), 预警第4根拉升
+# 用法:
+#   q-seed-threebar          # 全市场扫描, 输出 TOP 20
+#   q-seed-threebar 30       # TOP 30
+#   q-seed-threebar --dry    # 不推送, 只打印
+set -e
+cd "$(dirname "$0")/.."
+source .venv/bin/activate
+
+TOP=20
+DRY=0
+for arg in "$@"; do
+    case "$arg" in
+        --dry) DRY=1 ;;
+        [0-9]*) TOP="$arg" ;;
+    esac
+done
+
+echo "===== 三根红棍 扫描 (全市场, 约12分钟) ====="
+python3 -u scripts/run_scan.py --strategy three_red_bars --top "$TOP" --format jsonl \
+    | tee logs/three_red_bars_$(date +%Y%m%d).jsonl
+
+echo ""
+echo "===== 完成 ====="
+echo "  结果: logs/three_red_bars_$(date +%Y%m%d).jsonl"
+
+if [[ $DRY -eq 0 ]]; then
+    echo "  推送: q-push"
+    cat "logs/three_red_bars_$(date +%Y%m%d).jsonl" | q-push --tag "三根红棍"
+fi

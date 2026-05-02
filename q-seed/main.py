@@ -442,13 +442,21 @@ def main():
             else:
                 details[tname] = None
 
-        # K 线快照
+        # K 线快照 + 三角旗检测
         try:
             df = load_daily(code)
             kline = make_snapshot(df, th)
         except Exception as e:
             warn(f"kline snapshot failed for {code}: {e}")
             kline = {}
+            df = None
+
+        try:
+            from pennant import detect_pennant
+            pennant = detect_pennant(df)
+        except Exception as e:
+            warn(f"pennant detection failed for {code}: {e}")
+            pennant = {"detected": False}
 
         rec = {
             "code": code,
@@ -463,6 +471,7 @@ def main():
             "best_dist": round(item["best_dist"], 4),
             "details": details,
             "kline": kline,
+            "pennant": pennant,
             "meta": {
                 "scanner_version": VERSION,
                 "config_hash": config_hash,

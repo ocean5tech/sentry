@@ -129,6 +129,52 @@ def _fmt_boll_detail(r: dict) -> list[str]:
     return lines
 
 
+def _fmt_pennant(r: dict) -> list[str]:
+    """渲染三角旗收敛信息块."""
+    p = r.get("pennant") or {}
+    if not p.get("detected"):
+        return []
+    lines = ["【三角旗收敛】"]
+    start, end = p.get("pennant_start", ""), p.get("pennant_end", "")
+    if start and end:
+        lines[0] += f" {start} ～ {end}"
+    days = p.get("days_to_apex")
+    compression = p.get("compression")
+    if days is not None:
+        if days > 0:
+            lines.append(f"- 距收敛尖端: 约 {days} 个交易日")
+        elif days == 0:
+            lines.append("- 今日达到收敛尖端 ⚡")
+        else:
+            lines.append(f"- 已穿过尖端 {abs(days)} 个交易日（随时起爆）")
+    if compression is not None:
+        lines.append(f"- 压缩比: {compression:.0%}（越小越收敛）")
+    if p.get("near_breakout"):
+        lines.append("- ⚡ 即将突破，建议建底仓观察")
+    return lines
+
+
+def _fmt_three_red_bars(r: dict) -> list[str]:
+    """渲染三根红棍信号块."""
+    sig = r.get("signal_label", "")
+    if sig not in ("三根红棍", "第四根大阳"):
+        return []
+    candles = r.get("big_candles") or []
+    n = r.get("n_candles", len(candles))
+    avg_sp = r.get("avg_spacing")
+    lines = [f"【{sig}信号】({n}根大阳)"]
+    for k, c in enumerate(candles, 1):
+        d = c.get("date", f"{c.get('bars_ago','?')}日前")
+        lines.append(f"- 第{k}根: {d} 涨幅 {c.get('ret_pct', '?')}%")
+    if avg_sp:
+        lines.append(f"- 平均间距: {avg_sp:.0f}个交易日")
+    if sig == "第四根大阳":
+        lines.append("- ⭐ 第四根大阳出现，强势买入信号")
+    else:
+        lines.append("- 观察中，等待第四根大阳确认")
+    return lines
+
+
 def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool) -> str:
     """records → 企业微信 markdown 文本."""
     out_cfg = cfg.get("output", {})
@@ -181,6 +227,14 @@ def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool
         if r.get("signal_label") in ("下沿开仓", "中线缩量", "上沿突破加仓", "回踩上沿"):
             for dl in _fmt_boll_detail(r):
                 lines.append(f"> {dl}")
+
+        # 三角旗收敛 (q-seed)
+        for dl in _fmt_pennant(r):
+            lines.append(f"> {dl}")
+
+        # 三根红棍信号
+        for dl in _fmt_three_red_bars(r):
+            lines.append(f"> {dl}")
 
         # 重组/注资分析（有则展示）
         v   = r.get("verdict") or {}

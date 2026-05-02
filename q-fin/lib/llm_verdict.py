@@ -52,7 +52,11 @@ def _summarize_record(rec: dict) -> str:
     sh = rec.get("shareholders") or {}
     summary["major_new_entry"] = sh.get("major_new_entry")
     summary["top10_concentration_pct"] = sh.get("top10_concentration_pct")
-    summary["state_owned_pct"] = sh.get("state_owned_pct", 0)  # 国资持股%（流通盘压缩因子）
+    summary["state_owned_pct"] = sh.get("state_owned_pct", 0)
+    hc = sh.get("holder_count") or {}
+    if hc and "holder_count_chg_pct" in hc:
+        summary["holder_count_chg_pct"] = hc["holder_count_chg_pct"]
+        summary["holder_count_current"] = hc.get("holder_count_current")
 
     fund = rec.get("fundamentals") or {}
     summary["fundamentals"] = _trim(fund, [
@@ -121,6 +125,11 @@ def _build_prompt(rec_summary: str) -> str:
         "  - state_owned_pct 10-30%: 中控盘\n"
         "  - state_owned_pct < 10%: 低控盘, 正常分析\n"
         "top10_concentration_pct 如果主要来自国资, 不应视为流动性风险, 而应视为控盘利多.\n\n"
+        "【股东人数变化规则】\n"
+        "holder_count_chg_pct 是当期 vs 上期股东人数变化百分比（季报口径）.\n"
+        "  - 大幅减少 (< -10%): 筹码集中，主力锁仓，利多信号\n"
+        "  - 小幅变化 (-10% ~ +10%): 中性\n"
+        "  - 大幅增加 (> +10%): 散户涌入，筹码分散，可能已拉升过，需谨慎\n\n"
         "【重组/注资分析规则】\n"
         "如果数据中有产业资本新进或重组公告，必须详细分析以下内容并填入对应字段：\n"
         "  - acquirer_name: 新进方/重组方的真实名称（穿透SPV找到背后实控人或母公司）\n"
