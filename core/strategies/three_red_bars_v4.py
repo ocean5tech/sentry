@@ -122,20 +122,22 @@ def scan(df, symbol=None) -> dict | None:
     at_entry   = (cur_close <= c3_mid * (1 + RETRACE_TOL) and
                   vol_ma20 > 0 and cur_vol / vol_ma20 <= VOL_SHRINK)
 
-    # 是否有起爆日（第4根之后至今）
+    # 找最近起爆日（第4根之后至今，取最靠近今天的那根）
     launch_idx = None
     launch_ret = None
-    for li in range(fourth_idx + 1, n):
+    for li in range(n - 1, fourth_idx, -1):
         if C[li-1] <= 0:
             continue
         ret = (C[li] - C[li-1]) / C[li-1]
         if ret >= LAUNCH_PCT and C[li] > O[li]:
             launch_idx = li
             launch_ret = round(ret * 100, 1)
-            break  # 取最近起爆日
+            break  # 最近一根起爆日
 
-    # 评分
-    if launch_idx is not None and launch_idx >= n - 5:
+    launch_days_ago = (n - 1 - launch_idx) if launch_idx is not None else None
+
+    # 评分：起爆日在最近2个交易日内才算三红起爆（否则该卖了）
+    if launch_idx is not None and launch_days_ago <= 1:
         score = 5
         label = "三红起爆"
     elif at_entry:
@@ -154,7 +156,8 @@ def scan(df, symbol=None) -> dict | None:
         "at_entry":     at_entry,
         "vol_ratio":    round(cur_vol / vol_ma20, 2) if vol_ma20 > 0 else None,
         "cur_vs_mid":   round((cur_close - c3_mid) / c3_mid * 100, 1),
-        "launch_ret":   launch_ret,
+        "launch_ret":      launch_ret,
+        "launch_days_ago": launch_days_ago,
     }
 
     if dates is not None:

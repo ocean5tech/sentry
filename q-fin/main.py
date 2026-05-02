@@ -128,6 +128,7 @@ def read_input_codes(input_file):
             warn(f"input line {ln}: code is null/empty, skip")
             continue
         codes.append(str(c).strip())
+        _input_records[str(c).strip()] = obj
 
     if not codes:
         if explicit:
@@ -135,6 +136,9 @@ def read_input_codes(input_file):
             return []
         return None
     return codes
+
+
+_input_records: dict = {}  # code → original input record (populated by read_input_codes)
 
 
 def main():
@@ -287,17 +291,26 @@ def main():
             warn(f"{code} {nm} is ST, skip (用 --include-st 打开)")
             continue
 
+        # 保留上游（q-seed 等）的原始字段（details/pennant/kline/rank/signal_label 等）
+        _orig = _input_records.get(code, {})
         rec: dict = {
             "code": code,
             "name": nm,
             "scan_date": today.isoformat(),
-            "source": "q-fin",
+            "source": _orig.get("source", "q-fin"),
             "mode": mode,
-            "rank": 0,
+            "rank": _orig.get("rank", 0),
             "score": 0.0,
             "verdict": None,
             "entity_research": None,
         }
+        # 复制 q-seed 特有字段
+        for _k in ("details", "pennant", "signal_label", "c3_mid", "stop_price",
+                   "launch_date", "launch_ret", "launch_days_ago",
+                   "c1_date", "c2_date", "c3_date", "fourth_date",
+                   "scan_score", "at_entry", "vol_ratio", "cur_vs_mid"):
+            if _k in _orig:
+                rec[_k] = _orig[_k]
 
         # 模块 1: 公告
         if "ann" in enabled:

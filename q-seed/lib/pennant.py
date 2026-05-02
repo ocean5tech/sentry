@@ -71,7 +71,11 @@ def _check_window(H, L, C, dates_arr, n) -> dict | None:
     coef_l = np.polyfit(sl, L[sl], 1)
     slope_h, slope_l = float(coef_h[0]), float(coef_l[0])
 
+    # 对称收敛: 高点必须整体下降，低点必须整体上升
     if slope_h >= 0 or slope_l <= 0:
+        return None
+    # 显式验证: 第一个摆动高点 > 最后一个摆动高点，第一个摆动低点 < 最后一个摆动低点
+    if H[sh[0]] <= H[sh[-1]] or L[sl[0]] >= L[sl[-1]]:
         return None
 
     denom = slope_h - slope_l
@@ -110,6 +114,17 @@ def _check_window(H, L, C, dates_arr, n) -> dict | None:
 
     compression = round(wn / w0, 3)
 
+    # 摆动高点和低点的日期+价格（用于推送展示）
+    def _pts(indices, prices, dates):
+        out = []
+        for i in indices:
+            d = str(dates[i]) if dates is not None else f"bar{i}"
+            out.append({"date": d, "price": round(float(prices[i]), 2)})
+        return out
+
+    swing_highs = _pts(sh, H, dates_arr)
+    swing_lows  = _pts(sl, L, dates_arr)
+
     return {
         "detected": True,
         "slope_high": round(slope_h, 4),
@@ -124,6 +139,8 @@ def _check_window(H, L, C, dates_arr, n) -> dict | None:
         "low_mono": round(low_mono, 2),
         "pennant_start": str(dates_arr[0]) if dates_arr is not None else "",
         "pennant_end": str(dates_arr[-1]) if dates_arr is not None else "",
+        "swing_highs": swing_highs,
+        "swing_lows":  swing_lows,
     }
 
 

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# q-seed-short: 三红买入策略 — 实时扫描当日在买入点的股票
-# 信号: 3根箱体大阳 → 4根大阳 → 今日缩量回调至第3根中值 = 买入 / 起爆日出现 = 加仓
+# q-seed-short: 三红买入策略 — 实时扫描当日在买入点/起爆日的股票
+# 结果合并为一条消息推送，不做 LLM 分析
 #
 # 用法:
-#   q-seed-short           # 扫描全市场, 推 Top 5
-#   q-seed-short 10        # Top 10
+#   q-seed-short           # 扫描全市场, 推送汇总消息
 #   q-seed-short --dry     # 不推送，只打印
 set -euo pipefail
 
@@ -15,16 +14,14 @@ mkdir -p "$ROOT/logs"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
 
-TOP=5
 DRY=0
 for arg in "$@"; do
     case "$arg" in
-        --dry)  DRY=1 ;;
-        [0-9]*) TOP="$arg" ;;
+        --dry) DRY=1 ;;
     esac
 done
 
-log "=== q-seed-short 启动 (Top $TOP) ==="
+log "=== q-seed-short 启动 ==="
 
 # 1. 交易日检查
 if ! "$ROOT/scripts/is_trading_day"; then
@@ -37,9 +34,8 @@ log "今天是交易日, 继续"
 [ -f "$ROOT/.env" ] && { set -a; source "$ROOT/.env"; set +a; }
 
 PYTHON="$ROOT/.venv/bin/python"
-QFIN_PY="$ROOT/q-fin/.venv/bin/python"
 
-# 3. 扫描三红买入策略（score=4: 今日买入点 / score=5: 起爆日）
+# 3. 扫描
 log "扫描 three_red_bars_v4 策略..."
 TMP_SCAN=$(mktemp /tmp/short_scan_XXXXXX.json)
 
@@ -58,84 +54,57 @@ if [ ! -s "$TMP_SCAN" ]; then
 fi
 
 HIT_COUNT=$("$PYTHON" -c "import json; d=json.load(open('$TMP_SCAN')); print(len(d))")
-log "命中 $HIT_COUNT 只 (score≥4)"
-
-# 4. 转 JSONL，score=5(起爆) 优先，其次 score=4(买入)
-TMP_JSONL=$(mktemp /tmp/short_hits_XXXXXX.jsonl)
-"$PYTHON" -c "
-import json
-hits = json.load(open('$TMP_SCAN'))
-hits.sort(key=lambda x: (-x.get('score', 0), -x.get('vol_ratio', 999)))
-for h in hits[:$((TOP * 2))]:
-    h['source'] = 'q-seed-short'
-    print(json.dumps(h, ensure_ascii=False))
-" > "$TMP_JSONL"
-rm -f "$TMP_SCAN"
-
-JSONL_COUNT=$(wc -l < "$TMP_JSONL")
-log "预备分析 $JSONL_COUNT 只"
+log "命中 $HIT_COUNT 只"
 
 if [ "$DRY" -eq 1 ]; then
-    log "[DRY-RUN] 扫描结果:"
-    cat "$TMP_JSONL" | "$PYTHON" -c "
-import sys, json
-for line in sys.stdin:
-    r = json.loads(line)
-    print(f'  {r.get(\"code\")} {r.get(\"name\",\"\")} score={r.get(\"score\")} label={r.get(\"signal_label\")} c3_mid={r.get(\"c3_mid\")}')
-    "
-    rm -f "$TMP_JSONL"
+    "$PYTHON" - <<PYEOF
+import json, sys
+sys.path.insert(0, '$ROOT/q-push')
+from main import format_three_red_batch
+from datetime import date
+hits = json.load(open('$TMP_SCAN'))
+print(format_three_red_batch(hits, date.today().strftime('%Y-%m-%d')))
+PYEOF
+    rm -f "$TMP_SCAN"
     log "DRY-RUN 完成"
     exit 0
 fi
 
-# 5. q-fin 分析（free 模式，速度快）
-log "运行 q-fin free 分析..."
-QFIN_OUT=$(mktemp /tmp/short_qfin_XXXXXX.jsonl)
+# 4. 格式化并推送（单条消息）
+log "推送汇总消息..."
+"$PYTHON" - <<PYEOF 2>>"$LOG"
+import json, os, sys
+sys.path.insert(0, '$ROOT/q-push')
+sys.path.insert(0, '$ROOT')
 
-"$QFIN_PY" "$ROOT/q-fin/main.py" \
-    --input "$TMP_JSONL" \
-    --format jsonl \
-    --output "$QFIN_OUT" \
-    2>>"$LOG" || cp "$TMP_JSONL" "$QFIN_OUT"
+# 加载 .env
+from pathlib import Path
+env = Path('$ROOT/.env')
+if env.exists():
+    for ln in env.read_text().splitlines():
+        ln = ln.strip()
+        if ln and not ln.startswith('#') and '=' in ln:
+            k, _, v = ln.partition('=')
+            os.environ.setdefault(k.strip(), v.strip())
 
-rm -f "$TMP_JSONL"
+from main import format_three_red_batch, post_webhook
+from datetime import date
 
-# 6. 合并扫描字段（q-fin 可能丢失 signal_label 等）
-TMP_MERGED=$(mktemp /tmp/short_merged_XXXXXX.jsonl)
-"$PYTHON" -c "
-import json
+hits = json.load(open('$TMP_SCAN'))
+msg = format_three_red_batch(hits, date.today().strftime('%Y-%m-%d'))
 
-scan_data = {}
-# 读原始 scan 结果 (q-fin output 丢失了 scan 字段)
-with open('$QFIN_OUT') as f:
-    for line in f:
-        line = line.strip()
-        if not line: continue
-        r = json.loads(line)
-        # 确保 signal 字段存在
-        r.setdefault('signal_label', r.get('signal_label', '三红买入'))
-        print(json.dumps(r, ensure_ascii=False))
-" > "$TMP_MERGED"
-rm -f "$QFIN_OUT"
+webhook = os.environ.get('WECHAT_WEBHOOK_URL', '')
+if not webhook:
+    print('[q-seed-short] ERROR: WECHAT_WEBHOOK_URL 未设', file=sys.stderr)
+    sys.exit(1)
 
-# 7. 取 Top N 推送 (优先 score=5 起爆, 其次 score=4 买入)
-log "推送 Top $TOP..."
-"$PYTHON" -c "
-import json
-records = []
-with open('$TMP_MERGED') as f:
-    for line in f:
-        line = line.strip()
-        if line:
-            records.append(json.loads(line))
-records.sort(key=lambda x: (-x.get('score',0), -(x.get('verdict',{}) or {}).get('rating',0) or 0))
-for r in records[:$TOP]:
-    print(json.dumps(r, ensure_ascii=False))
-" | while IFS= read -r rec; do
-    sig=$(echo "$rec" | "$PYTHON" -c "import sys,json; r=json.loads(sys.stdin.read()); print(r.get('signal_label','三红买入'))")
-    echo "$rec" | "$PYTHON" "$ROOT/q-push/main.py" --tag "$sig" 2>>"$LOG"
-    sleep 1
-done
+result = post_webhook(webhook, msg, 'markdown')
+if result.get('ok'):
+    print('[q-seed-short] ✅ 推送成功', file=sys.stderr)
+else:
+    print(f'[q-seed-short] ❌ 推送失败: {result}', file=sys.stderr)
+    sys.exit(1)
+PYEOF
 
-rm -f "$TMP_MERGED"
+rm -f "$TMP_SCAN"
 log "=== q-seed-short 结束 ==="

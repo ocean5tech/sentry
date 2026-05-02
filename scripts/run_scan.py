@@ -169,7 +169,7 @@ def print_hits(hits: list[dict], limit: int = 50):
         print(f"\n{header}")
         print("-" * (50 + len(flag_keys) * 6))
         for h in hits[:limit]:
-            flags = " ".join(f"{h.get(k,''):>5}" for k in flag_keys)
+            flags = " ".join(f"{str(h.get(k,'') or ''):>5}" for k in flag_keys)
             name = h.get("name", "")[:8]
             print(f"{h['code']:<8} {name:<10} {h['date']:<12} {h['score']:>6} {h['close']:>8.2f} {flags}")
     else:

@@ -79,41 +79,47 @@ def _latest_report_date_candidates() -> list[str]:
 
 
 def fetch_holder_count(code: str, ak_module, cache) -> dict:
-    """拉取近两期股东人数，计算环比变化."""
+    """从 holder_count.py 共享缓存读取最近两期股东人数，计算环比变化."""
+    # 复用 holder_count.py 的缓存键 ("holder_count", (code, 8))，避免重复调用 API
     def _do():
         try:
-            df = ak_module.stock_holder_num_em(symbol=code)
+            df = ak_module.stock_zh_a_gdhs_detail_em(symbol=code)
             if df is None or df.empty:
-                return {"_err": "empty"}
-            date_col = next((c for c in ["截止日期", "报告日期", "日期"] if c in df.columns), None)
-            count_col = next((c for c in ["股东人数", "总股东人数"] if c in df.columns), None)
+                return {"rows": []}
+            date_col = next((c for c in ["股东户数统计截止日", "截至日期"] if c in df.columns), None)
+            count_col = next((c for c in ["股东户数-本次", "股东户数"] if c in df.columns), None)
+            avg_mv_col = "户均持股市值"
             if not date_col or not count_col:
-                return {"_err": f"cols not found: {list(df.columns)}"}
-            df = df.sort_values(date_col, ascending=False).reset_index(drop=True)
-            rows = df[[date_col, count_col]].head(3).to_dict("records")
-            return {"rows": rows, "dc": date_col, "cc": count_col}
+                return {"rows": []}
+            rows = []
+            for _, r in df.iterrows():
+                try:
+                    cnt = int(float(str(r[count_col]).replace(",", "")))
+                    avg_mv = float(str(r[avg_mv_col]).replace(",", "")) / 10000 if avg_mv_col in df.columns else None
+                    rows.append({"date": str(r[date_col])[:10], "count": cnt, "avg_mv_wan": avg_mv})
+                except Exception:
+                    pass
+            rows.sort(key=lambda x: x["date"], reverse=True)
+            return {"rows": rows[:8]}
         except Exception as e:
-            return {"_err": f"{type(e).__name__}: {e}"}
+            return {"rows": [], "_err": str(e)}
 
-    raw = cache.get_or_set("holder_count", (code,), _do)
-    if "_err" in raw:
-        return {"_err": raw["_err"]}
+    raw = cache.get_or_set("holder_count", (code, 8), _do)
     rows = raw.get("rows", [])
-    dc, cc = raw.get("dc"), raw.get("cc")
     if len(rows) < 2:
-        return {"_err": "need 2+ periods"}
+        return {}
     try:
-        cur = int(str(rows[0][cc]).replace(",", ""))
-        prev = int(str(rows[1][cc]).replace(",", ""))
+        cur  = rows[0]["count"]
+        prev = rows[1]["count"]
         chg_pct = round((cur - prev) / prev * 100, 1) if prev else None
         return {
-            "holder_count_date": str(rows[0][dc])[:10],
+            "holder_count_date":    rows[0]["date"],
             "holder_count_current": cur,
-            "holder_count_prev": prev,
+            "holder_count_prev":    prev,
             "holder_count_chg_pct": chg_pct,
         }
-    except Exception as e:
-        return {"_err": f"parse: {e}"}
+    except Exception:
+        return {}
 
 
 def analyze(code: str, kw_cfg: dict, ak_module, cache) -> dict:

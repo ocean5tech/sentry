@@ -108,6 +108,13 @@ def find_signals(df: pd.DataFrame) -> list[dict]:
         if signals and signals[-1]["trigger_idx"] == trigger_idx:
             continue
 
+        # ── 箱体约束: 首根与末根基准价(前日收盘)偏移 ≤10% ─────────────
+        base_prices = [C[i - 1] for i in c3 if i > 0 and C[i - 1] > 0]
+        if len(base_prices) >= 2:
+            drift = abs(base_prices[-1] - base_prices[0]) / base_prices[0]
+            if drift > 0.10:
+                continue  # 趋势行情，不是箱体震荡
+
         # 第3根大阳的涨幅
         rets_3 = [(C[i] - C[i - 1]) / C[i - 1] for i in c3]
 

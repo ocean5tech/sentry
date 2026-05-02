@@ -130,27 +130,123 @@ def _fmt_boll_detail(r: dict) -> list[str]:
 
 
 def _fmt_pennant(r: dict) -> list[str]:
-    """渲染三角旗收敛信息块."""
+    """渲染三角旗收敛信息块（含高低点日期和价格）."""
     p = r.get("pennant") or {}
     if not p.get("detected"):
         return []
-    lines = ["【三角旗收敛】"]
     start, end = p.get("pennant_start", ""), p.get("pennant_end", "")
+    header = "【三角旗收敛】"
     if start and end:
-        lines[0] += f" {start} ～ {end}"
+        header += f" {start} ～ {end}"
+    lines = [header]
+
+    # 摆动高点（应逐步下降）
+    sh = p.get("swing_highs", [])
+    if sh:
+        pts = "  →  ".join(f"{x['date']} {x['price']}" for x in sh)
+        lines.append(f"- 高点序列（递降）: {pts}")
+
+    # 摆动低点（应逐步上升）
+    sl = p.get("swing_lows", [])
+    if sl:
+        pts = "  →  ".join(f"{x['date']} {x['price']}" for x in sl)
+        lines.append(f"- 低点序列（递升）: {pts}")
+
     days = p.get("days_to_apex")
     compression = p.get("compression")
+    if compression is not None:
+        lines.append(f"- 收敛进度: {compression:.0%}（越小越紧）")
     if days is not None:
         if days > 0:
-            lines.append(f"- 距收敛尖端: 约 {days} 个交易日")
+            lines.append(f"- 距尖端: 约 {days} 个交易日")
         elif days == 0:
             lines.append("- 今日达到收敛尖端 ⚡")
         else:
-            lines.append(f"- 已穿过尖端 {abs(days)} 个交易日（随时起爆）")
-    if compression is not None:
-        lines.append(f"- 压缩比: {compression:.0%}（越小越收敛）")
+            lines.append(f"- 已过尖端 {abs(days)} 个交易日（随时起爆）")
     if p.get("near_breakout"):
-        lines.append("- ⚡ 即将突破，建议建底仓观察")
+        lines.append("- ⚡ 已临近突破窗口，轻仓候补")
+    return lines
+
+
+def _fmt_hongjing_detail(r: dict) -> list[str]:
+    """宏景型信号推理链：形态相似度 + 三角旗 + 入场建议."""
+    detail = (r.get("details") or {}).get("hongjing") or {}
+    kline  = r.get("kline") or {}
+    p      = r.get("pennant") or {}
+    cur    = kline.get("current_price") or r.get("close")
+    scan_date = r.get("scan_date", time.strftime("%Y-%m-%d"))
+
+    lines = ["【宏景型信号】"]
+
+    # 相似度
+    dist = detail.get("dist")
+    sig_date = detail.get("sig_date", "")
+    if dist is not None:
+        quality = "极高" if dist < 4.5 else ("高" if dist < 6.0 else "中")
+        lines.append(f"- 形态相似度: {quality}（KNN距离 {dist:.2f}，越小越像宏景科技起爆前）")
+    if sig_date:
+        lines.append(f"- 信号触发日: {sig_date}")
+
+    # MA20 / 近期走势
+    ret5  = kline.get("ret5")
+    ret20 = kline.get("ret20")
+    vr    = kline.get("volume_ratio_5d_20d")
+    if ret5 is not None:
+        lines.append(f"- 近5日涨跌: {ret5:+.1%}，近20日: {ret20:+.1%}")
+    if vr is not None:
+        vol_desc = "放量" if vr > 1.3 else ("缩量" if vr < 0.8 else "平量")
+        lines.append(f"- 量比(5d/20d): {vr:.2f}x（{vol_desc}）")
+
+    # 三角旗（如检测到则展开；未检测到简单说明）
+    if p.get("detected"):
+        for l in _fmt_pennant(r):
+            lines.append(l)
+        if p.get("dip_today"):
+            lines.append("- 🔔 今日缩量下跌 = 挖坑买入候选，等≥10%大阳确认起爆")
+    else:
+        lines.append("- 三角旗: 尚未满足对称收敛条件，持续跟踪")
+
+    # LLM 评判（paid 模式下才有）
+    v = r.get("verdict") or {}
+    if v.get("one_liner") or v.get("key_risks"):
+        lines.append("【LLM评判】")
+        if v.get("one_liner"):
+            lines.append(f"- {v['one_liner']}")
+        risks = v.get("key_risks") or []
+        if risks:
+            lines.append(f"- 风险: {' / '.join(risks[:3])}")
+        entry_sug = v.get("entry_suggestion")
+        if entry_sug:
+            lines.append(f"- 建议: {entry_sug}")
+
+    # 股东人数变化（在 shareholders.holder_count 里）
+    hc = (r.get("shareholders") or {}).get("holder_count") or {}
+    chg = hc.get("holder_count_chg_pct")
+    if chg is not None:
+        cur_cnt = hc.get("holder_count_current", "?")
+        hc_date = hc.get("holder_count_date", "?")
+        if chg < -10:
+            trend = f"↓{abs(chg):.1f}%（筹码集中，利多）"
+        elif chg > 10:
+            trend = f"↑{chg:.1f}%（散户涌入，需谨慎）"
+        else:
+            trend = f"{chg:+.1f}%（基本稳定）"
+        lines.append(f"- 股东人数({hc_date}): {cur_cnt:,} 户，环比 {trend}")
+
+    # 入场建议
+    if cur:
+        t1 = _next_trading_day(scan_date)
+        entry = round(cur * 1.01, 2)
+        stop  = round(cur * 0.92, 2)
+        tgt   = round(cur * 1.40, 2)
+        stop_pct = round((stop - entry) / entry * 100, 1)
+        tgt_pct  = round((tgt  - entry) / entry * 100, 1)
+        lines.append("【入场建议】")
+        lines.append(f"- T+1 参考: {entry:.2f} 元（{t1}，待三角旗/起爆日确认）")
+        lines.append(f"- 止损: {stop:.2f}（{stop_pct:+.1f}%，跌破则形态失效）")
+        lines.append(f"- 目标: {tgt:.2f}（{tgt_pct:+.1f}%，宏景型历史均收益 +32~61%）")
+
+    lines.append("⚠️ 形态相似度选股，仅供研究参考，非投资建议")
     return lines
 
 
@@ -191,34 +287,84 @@ def _fmt_three_red_v4(r: dict) -> list[str]:
     emoji = {"三红观察": "👁", "三红买入": "🔔", "三红起爆": "⚡"}[sig]
     lines = [f"【{emoji} {sig}】"]
 
-    for key, label in [("c1_date","第1根"), ("c2_date","第2根"), ("c3_date","第3根"), ("fourth_date","第4根")]:
+    # 三根阳线 + 第4根日期
+    for key, label in [("c1_date","第1阳"), ("c2_date","第2阳"), ("c3_date","第3阳"), ("fourth_date","第4阳(确认)")]:
         if r.get(key):
             lines.append(f"- {label}: {r[key]}")
 
     if c3_mid:
-        lines.append(f"- 第3根中值(买入参考): {c3_mid:.2f}")
+        lines.append(f"- 第3阳中值(入场参考): {c3_mid:.2f}")
     if stop_px:
         diff = round((stop_px - c3_mid) / c3_mid * 100, 1) if c3_mid else None
-        lines.append(f"- 止损: {stop_px:.2f}" + (f"（{diff:+.1f}%）" if diff else ""))
+        lines.append(f"- 初始止损(第3阳LOW): {stop_px:.2f}" + (f"（{diff:+.1f}%）" if diff else ""))
     if fourth_h:
-        lines.append(f"- 前高(第4根): {fourth_h:.2f}")
+        lines.append(f"- 第4阳高点(短期阻力): {fourth_h:.2f}")
     if vol_ratio is not None:
         lines.append(f"- 今日量比: {vol_ratio:.2f}x")
     if cur_vs_mid is not None:
         lines.append(f"- 当前偏离中值: {cur_vs_mid:+.1f}%")
+
+    # 起爆日信息（含距今天数）
     if launch_ret:
         ld = r.get("launch_date", "")
-        lines.append(f"- 起爆日: {ld} 涨幅 {launch_ret}%")
+        days_ago = r.get("launch_days_ago")
+        ago_str = f"今日" if days_ago == 0 else (f"昨日" if days_ago == 1 else f"{days_ago}日前")
+        lines.append(f"- ⚡ 起爆日: {ld}（{ago_str}）涨幅 +{launch_ret}%，止损移至起爆日中值")
 
     if sig == "三红买入":
-        lines.append("- ✅ 今日已回调至中值区+缩量，可建仓（止损第3根LOW）")
-        lines.append("- 等待起爆日(≥8%大阳)出现后追加仓位，移止损至起爆中值")
+        lines.append("- ✅ 今日在回调买入点：价格≤第3阳中值×103% + 缩量")
+        lines.append("- 操作：轻仓建底，等起爆日(≥8%大阳)再加仓，止损第3阳LOW")
     elif sig == "三红起爆":
-        lines.append("- ⚡ 起爆日已出现！跟进加仓，止损移至起爆日中值，持3天卖出")
+        lines.append("- ⚡ 起爆日刚出现！可跟进加仓，止损移至起爆日中值，持3天卖出")
     else:
         lines.append("- 等待价格回调至中值区且缩量时买入")
 
     return lines
+
+
+def format_three_red_batch(hits: list[dict], scan_date: str = "") -> str:
+    """将三红策略所有命中整理成一条汇总消息."""
+    if not scan_date:
+        scan_date = time.strftime("%Y-%m-%d")
+    score5 = [h for h in hits if h.get("score") == 5]
+    score4 = [h for h in hits if h.get("score") == 4]
+
+    lines = [f"## ⚡ 三红买入策略 · {scan_date}", ""]
+
+    if score5:
+        lines.append(f"**🚀 三红起爆（今日/昨日起爆，可追加仓）** {len(score5)} 只")
+        for h in score5:
+            ld = h.get("launch_date", "?")
+            days_ago = h.get("launch_days_ago", "?")
+            ago = "今日" if days_ago == 0 else ("昨日" if days_ago == 1 else f"{days_ago}日前")
+            lret = h.get("launch_ret", "?")
+            c3 = h.get("c3_date", "?")
+            stop = h.get("stop_price", "?")
+            lines.append(f"- **{h.get('name','')} ({h.get('code','')})** "
+                         f"第3阳:{c3} | 起爆:{ld}({ago})+{lret}% | 止损:{stop}")
+        lines.append("")
+
+    if score4:
+        lines.append(f"**🔔 三红买入点（今日在回调区+缩量，可轻仓建底）** {len(score4)} 只")
+        for h in score4[:15]:
+            c3 = h.get("c3_date", "?")
+            fd = h.get("fourth_date", "?")
+            c3m = h.get("c3_mid")
+            stop = h.get("stop_price", "?")
+            vs = h.get("cur_vs_mid")
+            vr = h.get("vol_ratio")
+            mid_str = f"中值:{c3m:.2f} " if c3m else ""
+            vs_str = f"偏离:{vs:+.1f}% " if vs is not None else ""
+            vr_str = f"量比:{vr:.2f}x" if vr is not None else ""
+            lines.append(f"- **{h.get('name','')} ({h.get('code','')})** "
+                         f"第3阳:{c3} | 第4阳:{fd} | {mid_str}{vs_str}{vr_str} | 止损:{stop}")
+        if len(score4) > 15:
+            lines.append(f"  ...（共{len(score4)}只，仅列前15）")
+        lines.append("")
+
+    lines.append("- 操作：三红买入轻仓建底，止损第3阳LOW；起爆日出现后加仓，止损移至起爆日中值，持3天卖出")
+    lines.append("⚠️ 仅供研究参考，不构成投资建议")
+    return "\n".join(lines)
 
 
 def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool) -> str:
@@ -257,13 +403,10 @@ def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool
             mark = "🔴" if started else ("🟢" if started is False else "⚪")
             concept_str = f" · {concept} {mark}"
 
-        score_str = f"score={score}" if score is not None else ""
-
         # 主行
         lines.append(f"**{emoji} {name} ({code})**{rating_str}")
-        # 副行
+        # 副行 (不显示原始 score 数字，投资者看不懂)
         sub = []
-        if score_str: sub.append(score_str)
         if concept_str: sub.append(concept_str.strip(" ·"))
         if one_liner: sub.append(one_liner)
         if sub:
@@ -274,14 +417,10 @@ def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool
             for dl in _fmt_boll_detail(r):
                 lines.append(f"> {dl}")
 
-        # 三角旗收敛 (q-seed)
-        for dl in _fmt_pennant(r):
-            lines.append(f"> {dl}")
-        # 三角旗缩量挖坑买入点
-        p = r.get("pennant") or {}
-        if p.get("detected") and p.get("dip_today"):
-            lines.append("> 【🔔 三角旗挖坑买入点】今日缩量下跌 = 候选入场时机")
-            lines.append(">   等待后续≥10%放量大涨确认起爆，出现前轻仓观察")
+        # 宏景型选股详情（q-seed 来源）
+        elif r.get("source") == "q-seed" and r.get("details", {}).get("hongjing") is not None:
+            for dl in _fmt_hongjing_detail(r):
+                lines.append(f"> {dl}")
 
         # 三根红棍信号 (旧版)
         for dl in _fmt_three_red_bars(r):
