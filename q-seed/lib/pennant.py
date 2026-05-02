@@ -2,9 +2,10 @@
 
 必须同时满足:
   1. 几何收敛: 高点趋势线下倾 + 低点趋势线上倾 + 当前价在通道内
-  2. 时长合理: 20~65 个交易日（1~3 个月）
+  2. 时长合理: 40~130 个交易日（2~6 个月）
   3. MA20 稳健上升: slope > 0 且单调上升比 ≥ 60%
-  4. 低点单调递增: 摆动低点逐步抬高（至少 2/3 的相邻低点上升）
+  4. 低点单调递增: 摆动低点逐步抬高
+  5. 波浪显著: 相邻摆动点间距 ≥ 10 天，每轮波幅 ≥ 5%
 """
 
 import numpy as np
@@ -13,14 +14,18 @@ import numpy as np
 DIP_VOL_RATIO = 0.80   # 量比 < 此值视为缩量
 DIP_LOOKBACK  = 3      # 检测最近N根K线是否有缩量下跌
 
-SWING_WIN = 2
+SWING_WIN = 5          # 摆动高低点判断窗口（±5天，过滤日内噪音）
 MIN_SWINGS = 2
-APEX_MAX_FUTURE = 25
-APEX_MAX_PAST = 10
+APEX_MAX_FUTURE = 30
+APEX_MAX_PAST = 15
 
 # 时长约束（交易日）
-MIN_WIN = 20
-MAX_WIN = 65
+MIN_WIN = 40           # 最短2个月（约40个交易日）
+MAX_WIN = 130          # 最长6个月
+
+# 波浪质量约束
+MIN_SWING_SPACING = 10  # 相邻摆动点间距至少10个交易日（约2周）
+MIN_WAVE_AMP = 0.05     # 每轮波幅（高点到低点）至少5%
 
 # MA20 要求
 MA20_MIN_SLOPE = 0.0      # 斜率必须 > 0（上升）
@@ -29,7 +34,7 @@ MA20_MIN_MONO = 0.60      # 单调上升比 ≥ 60%
 # 低点单调要求
 LOW_MIN_MONO = 0.67       # 相邻低点中至少 2/3 上升
 
-WINDOW_SIZES = [22, 28, 35, 45, 60]
+WINDOW_SIZES = [45, 55, 65, 80, 100, 130]
 
 
 def _local_highs(H: np.ndarray, window: int = SWING_WIN) -> list[int]:
@@ -40,6 +45,17 @@ def _local_highs(H: np.ndarray, window: int = SWING_WIN) -> list[int]:
 def _local_lows(L: np.ndarray, window: int = SWING_WIN) -> list[int]:
     return [i for i in range(window, len(L) - window)
             if L[i] <= min(L[i - window: i + window + 1])]
+
+
+def _filter_spacing(indices: list[int], min_spacing: int) -> list[int]:
+    """保留满足最小间距的摆动点序列（贪心选取）."""
+    if not indices:
+        return []
+    kept = [indices[0]]
+    for idx in indices[1:]:
+        if idx - kept[-1] >= min_spacing:
+            kept.append(idx)
+    return kept
 
 
 def _ma20_trend(C: np.ndarray):
@@ -62,9 +78,17 @@ def _low_monotone(sl_prices: list[float]):
 
 
 def _check_window(H, L, C, dates_arr, n) -> dict | None:
-    sh = _local_highs(H)
-    sl = _local_lows(L)
+    sh = _filter_spacing(_local_highs(H), MIN_SWING_SPACING)
+    sl = _filter_spacing(_local_lows(L),  MIN_SWING_SPACING)
     if len(sh) < MIN_SWINGS or len(sl) < MIN_SWINGS:
+        return None
+
+    # 波幅检验：第一个摆动高点到第一个摆动低点的振幅必须足够大
+    avg_price = float(np.mean(C)) + 1e-9
+    first_high = float(H[sh[0]])
+    first_low  = float(L[sl[0]])
+    wave_amp = abs(first_high - first_low) / avg_price
+    if wave_amp < MIN_WAVE_AMP:
         return None
 
     coef_h = np.polyfit(sh, H[sh], 1)

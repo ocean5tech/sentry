@@ -169,22 +169,28 @@ def _fmt_pennant(r: dict) -> list[str]:
     return lines
 
 
+def _fmt_pennant_signal(r: dict) -> list[str]:
+    """统一的三角旗信号推理链（q-seed宏景 + q-pennant全市场）."""
+    return _fmt_hongjing_detail(r)
+
+
 def _fmt_hongjing_detail(r: dict) -> list[str]:
-    """宏景型信号推理链：形态相似度 + 三角旗 + 入场建议."""
+    """三角旗信号推理链：三角旗详情 + DeepSeek评判 + 入场建议."""
     detail = (r.get("details") or {}).get("hongjing") or {}
     kline  = r.get("kline") or {}
     p      = r.get("pennant") or {}
     cur    = kline.get("current_price") or r.get("close")
     scan_date = r.get("scan_date", time.strftime("%Y-%m-%d"))
 
-    lines = ["【宏景型信号】"]
+    source = r.get("source", "q-seed")
+    lines = ["【三角旗收敛信号】"]
 
-    # 相似度
+    # 宏景KNN相似度（q-seed 才有）
     dist = detail.get("dist")
     sig_date = detail.get("sig_date", "")
-    if dist is not None:
+    if dist is not None and dist > 0:
         quality = "极高" if dist < 4.5 else ("高" if dist < 6.0 else "中")
-        lines.append(f"- 形态相似度: {quality}（KNN距离 {dist:.2f}，越小越像宏景科技起爆前）")
+        lines.append(f"- 宏景相似度: {quality}（KNN距离 {dist:.2f}）")
     if sig_date:
         lines.append(f"- 信号触发日: {sig_date}")
 
@@ -426,9 +432,9 @@ def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool
             for dl in _fmt_boll_detail(r):
                 lines.append(f"> {dl}")
 
-        # 宏景型选股详情（q-seed 来源）
-        elif r.get("source") == "q-seed" and r.get("details", {}).get("hongjing") is not None:
-            for dl in _fmt_hongjing_detail(r):
+        # 宏景型 / 三角旗选股详情
+        elif r.get("source") in ("q-seed", "q-pennant"):
+            for dl in _fmt_pennant_signal(r):
                 lines.append(f"> {dl}")
 
         # 三根红棍信号 (旧版)
