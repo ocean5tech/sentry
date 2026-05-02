@@ -70,6 +70,14 @@ def _check_window(H, L, closes, dates_arr, n) -> dict | None:
     if w0 <= 0 or wn <= 0 or wn >= w0:
         return None
 
+    # 当前价格必须在通道内 (否则已起爆/已跌破)
+    current_close = float(closes[-1])
+    upper_now = float(np.polyval(coef_h, n - 1))
+    lower_now = float(np.polyval(coef_l, n - 1))
+    # 允许轻微突破上沿5%（即将起爆的信号），但不能超出太多
+    if current_close > upper_now * 1.08 or current_close < lower_now * 0.92:
+        return None
+
     compression = round(wn / w0, 3)
 
     return {

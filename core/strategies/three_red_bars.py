@@ -62,6 +62,14 @@ def scan(df) -> dict | None:
     if len(best_chain) < 3:
         return None
 
+    # ── 箱体约束：各根红棍的"基准价"(前一日收盘)变化 ≤ 10% ──────────────
+    # 排除趋势行情中的阳线堆叠，只保留震荡箱体中出现的信号
+    base_prices = [C[i - 1] for i in best_chain[:3] if i > 0 and C[i - 1] > 0]
+    if len(base_prices) >= 2:
+        net_drift = abs(base_prices[-1] - base_prices[0]) / base_prices[0]
+        if net_drift > 0.10:  # 首根与末根的基准价偏移超10%视为趋势行情
+            return None
+
     last_idx = best_chain[-1]
     bars_since_last = n - 1 - last_idx
 
