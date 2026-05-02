@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# q-hongjing-batch: 宏景型选股 — 必须检测到三角旗才推送
+# 流程: q-seed hongjing → pennant过滤 → q-fin paid → 每股一条推送
+#
+# 用法:
+#   q-hongjing-batch        # 扫描全市场, 只推有三角旗的
+#   q-hongjing-batch --dry  # 不推送，只打印
+set -euo pipefail
+
+SELF="$(readlink -f "$0")"
+ROOT="$(dirname "$SELF")/.."
+LOG="$ROOT/logs/q-hongjing-batch.log"
+mkdir -p "$ROOT/logs"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+
+DRY=0
+for arg in "$@"; do
+    case "$arg" in --dry) DRY=1 ;; esac
+done
+
+log "=== q-hongjing-batch 启动 ==="
+
+# 1. 交易日检查
+if ! "$ROOT/scripts/is_trading_day"; then
+    log "今天非交易日, 退出"
+    exit 0
+fi
+log "今天是交易日, 继续"
+
+# 2. 加载 .env
+[ -f "$ROOT/.env" ] && { set -a; source "$ROOT/.env"; set +a; }
+
+PYTHON="$ROOT/.venv/bin/python"
+QSEED="$ROOT/q-seed/q-seed"
+QFIN_PY="$ROOT/q-fin/.venv/bin/python"
+
+# 3. q-seed 宏景扫描（含三角旗检测）
+log "扫描宏景型形态 + 三角旗检测..."
+TMP_SEED=$(mktemp /tmp/hongjing_seed_XXXXXX.jsonl)
+
+"$QSEED" --template hongjing --top 30 2>>"$LOG" > "$TMP_SEED" || true
+
+if [ ! -s "$TMP_SEED" ]; then
+    log "q-seed 无输出，退出"
+    rm -f "$TMP_SEED"
+    exit 0
+fi
+
+TOTAL=$("$PYTHON" -c "
+with open('$TMP_SEED') as f:
+    lines = [l for l in f if l.strip()]
+print(len(lines))
+")
+log "q-seed 扫描 $TOTAL 只候选"
+
+# 4. 过滤：只保留 pennant.detected == True
+TMP_PENNANT=$(mktemp /tmp/hongjing_pennant_XXXXXX.jsonl)
+"$PYTHON" -c "
+import json, sys
+passed = []
+with open('$TMP_SEED') as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        p = r.get('pennant') or {}
+        if p.get('detected'):
+            passed.append(r)
+            print(json.dumps(r, ensure_ascii=False))
+
+print(f'三角旗过滤: {len(passed)} / {len(open(\"$TMP_SEED\").readlines())} 只通过', file=sys.stderr)
+" > "$TMP_PENNANT" 2>>"$LOG"
+rm -f "$TMP_SEED"
+
+PENNANT_COUNT=$("$PYTHON" -c "
+with open('$TMP_PENNANT') as f:
+    lines = [l for l in f if l.strip()]
+print(len(lines))
+")
+log "三角旗通过: $PENNANT_COUNT 只"
+
+if [ "$PENNANT_COUNT" -eq 0 ]; then
+    log "今日无宏景三角旗信号，退出"
+    rm -f "$TMP_PENNANT"
+    exit 0
+fi
+
+if [ "$DRY" -eq 1 ]; then
+    log "[DRY-RUN] 三角旗通过的股票:"
+    "$PYTHON" -c "
+import json
+with open('$TMP_PENNANT') as f:
+    for line in f:
+        r = json.loads(line.strip())
+        p = r.get('pennant', {})
+        print(f'  {r[\"code\"]} {r.get(\"name\",\"\"):10} pennant={p.get(\"pennant_start\")}~{p.get(\"pennant_end\")} dip={p.get(\"dip_today\")}')
+    "
+    rm -f "$TMP_PENNANT"
+    log "DRY-RUN 完成"
+    exit 0
+fi
+
+# 5. q-fin paid 分析
+log "运行 q-fin paid 分析 $PENNANT_COUNT 只..."
+TMP_QFIN=$(mktemp /tmp/hongjing_qfin_XXXXXX.jsonl)
+
+"$QFIN_PY" "$ROOT/q-fin/main.py" \
+    --input "$TMP_PENNANT" \
+    --format jsonl \
+    --paid \
+    --output "$TMP_QFIN" \
+    2>>"$LOG" || cp "$TMP_PENNANT" "$TMP_QFIN"
+rm -f "$TMP_PENNANT"
+
+# 6. 每股一条推送
+log "每股单独推送..."
+cat "$TMP_QFIN" | "$PYTHON" "$ROOT/q-push/main.py" \
+    --tag "宏景三角旗" \
+    --per-stock \
+    2>>"$LOG"
+
+rm -f "$TMP_QFIN"
+log "=== q-hongjing-batch 结束 ==="

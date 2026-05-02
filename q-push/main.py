@@ -26,6 +26,7 @@ def parse_args():
     ap.add_argument("--config", default=str(ROOT / "config.yaml"))
     ap.add_argument("--dry-run", action="store_true", help="不真推, 打印 markdown")
     ap.add_argument("--no-link", action="store_true", help="不带 dashboard 链接")
+    ap.add_argument("--per-stock", action="store_true", help="每股单独一条消息（q-seed 宏景用）")
     return ap.parse_args()
 
 
@@ -197,19 +198,17 @@ def _fmt_hongjing_detail(r: dict) -> list[str]:
         vol_desc = "放量" if vr > 1.3 else ("缩量" if vr < 0.8 else "平量")
         lines.append(f"- 量比(5d/20d): {vr:.2f}x（{vol_desc}）")
 
-    # 三角旗（如检测到则展开；未检测到简单说明）
+    # 三角旗（必须检测到才显示；调用方应已过滤掉未检测的）
     if p.get("detected"):
         for l in _fmt_pennant(r):
             lines.append(l)
         if p.get("dip_today"):
             lines.append("- 🔔 今日缩量下跌 = 挖坑买入候选，等≥10%大阳确认起爆")
-    else:
-        lines.append("- 三角旗: 尚未满足对称收敛条件，持续跟踪")
 
-    # LLM 评判（paid 模式下才有）
+    # DeepSeek评判（paid 模式下才有）
     v = r.get("verdict") or {}
     if v.get("one_liner") or v.get("key_risks"):
-        lines.append("【LLM评判】")
+        lines.append("【DeepSeek评判】")
         if v.get("one_liner"):
             lines.append(f"- {v['one_liner']}")
         risks = v.get("key_risks") or []
@@ -529,6 +528,40 @@ def main():
         sys.exit(0)
 
     include_link = cfg.get("output", {}).get("include_link", True) and not args.no_link
+    msg_type = cfg.get("wechat", {}).get("msg_type", "markdown")
+    retry    = cfg.get("wechat", {}).get("retry_times", 2)
+    timeout  = cfg.get("wechat", {}).get("timeout_seconds", 10)
+
+    if args.per_stock:
+        # 每股单独一条消息（宏景型用）
+        if args.dry_run:
+            for r in records:
+                msg = format_markdown([r], args.tag, cfg, include_link)
+                print(f"=== {r.get('code')} {r.get('name')} ===")
+                print(msg)
+                print()
+            return
+        load_env()
+        env_var = cfg.get("wechat", {}).get("webhook_url_env", "WECHAT_WEBHOOK_URL")
+        webhook = os.environ.get(env_var)
+        if not webhook:
+            print(f"ERROR: env {env_var} 未设", file=sys.stderr)
+            sys.exit(1)
+        ok_cnt = 0
+        for r in records:
+            msg = format_markdown([r], args.tag, cfg, include_link)
+            result = post_webhook(webhook, msg, msg_type, retry, timeout)
+            code = r.get("code", "?")
+            name = r.get("name", "")
+            if result.get("ok"):
+                print(f"[q-push] ✅ {name}({code}) 推送成功", file=sys.stderr)
+                ok_cnt += 1
+            else:
+                print(f"[q-push] ❌ {name}({code}) 失败: {result.get('errmsg')}", file=sys.stderr)
+            time.sleep(1)
+        print(f"[q-push] 共推送 {ok_cnt}/{len(records)} 条", file=sys.stderr)
+        return
+
     msg = format_markdown(records, args.tag, cfg, include_link)
 
     if args.dry_run:
@@ -544,10 +577,6 @@ def main():
     if not webhook:
         print(f"ERROR: env {env_var} 未设, 请检查 ~/sentry/quant/.env", file=sys.stderr)
         sys.exit(1)
-
-    msg_type = cfg.get("wechat", {}).get("msg_type", "markdown")
-    retry = cfg.get("wechat", {}).get("retry_times", 2)
-    timeout = cfg.get("wechat", {}).get("timeout_seconds", 10)
 
     print(f"[q-push] 推送 {len(records)} 条 (前 {min(len(records), 5)} 入消息) → 企业微信...", file=sys.stderr)
     result = post_webhook(webhook, msg, msg_type, retry, timeout)

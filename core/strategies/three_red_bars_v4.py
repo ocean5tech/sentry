@@ -32,6 +32,7 @@ RETRACE_TOL       = 0.03   # 回调至第3根中值 ±3%
 VOL_SHRINK        = 0.80   # 量比 < 0.8 视为缩量
 LAUNCH_PCT        = 0.08   # 起爆日阈值
 LOOKBACK          = 120    # 最多回溯历史
+RETRACE_WINDOW    = 15     # 第4阳出现后N个交易日内才算有效买入窗口
 
 
 def _find_big_candles(C, O):
@@ -116,11 +117,13 @@ def scan(df, symbol=None) -> dict | None:
     stop_price = float(L[c3[2]])
     vol_ma20  = float(np.mean(V[max(0, trig - 19): trig + 1]))
 
-    # 今日状态检查
-    cur_close  = float(C[-1])
-    cur_vol    = float(V[-1])
-    at_entry   = (cur_close <= c3_mid * (1 + RETRACE_TOL) and
-                  vol_ma20 > 0 and cur_vol / vol_ma20 <= VOL_SHRINK)
+    # 今日状态检查：第4阳后RETRACE_WINDOW天内 + 回调至c3中值 + 缩量
+    cur_close       = float(C[-1])
+    cur_vol         = float(V[-1])
+    days_since_4th  = (n - 1) - fourth_idx
+    at_entry        = (days_since_4th <= RETRACE_WINDOW and
+                       cur_close <= c3_mid * (1 + RETRACE_TOL) and
+                       vol_ma20 > 0 and cur_vol / vol_ma20 <= VOL_SHRINK)
 
     # 找最近起爆日（第4根之后至今，取最靠近今天的那根）
     launch_idx = None
@@ -156,8 +159,9 @@ def scan(df, symbol=None) -> dict | None:
         "at_entry":     at_entry,
         "vol_ratio":    round(cur_vol / vol_ma20, 2) if vol_ma20 > 0 else None,
         "cur_vs_mid":   round((cur_close - c3_mid) / c3_mid * 100, 1),
-        "launch_ret":      launch_ret,
-        "launch_days_ago": launch_days_ago,
+        "launch_ret":       launch_ret,
+        "launch_days_ago":  launch_days_ago,
+        "days_since_4th":   days_since_4th,
     }
 
     if dates is not None:
