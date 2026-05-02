@@ -1,8 +1,8 @@
 # Sentry Quant — A股量化选股系统
 
-**Status**: V1.8 (2026-05-02)
+**Status**: V1.9 (2026-05-03)
 **Owner**: wooyoo@gmail.com
-**Last update**: 2026-05-02
+**Last update**: 2026-05-03
 
 围绕 A 股 (~11000 只) 的形态/规则/事件驱动选股。单进程 + 文件存储，无 DB，无后端服务。
 
@@ -11,7 +11,9 @@
 ## 当前能力
 
 ```
-形态相似度   q-seed          (KNN, 6模板 + 三角旗四重检测 + 缩量挖坑买入点)
+形态相似度   q-seed          (KNN, 6模板 + 三角旗五重检测 + 缩量挖坑买入点)
+          ↓
+三角旗全市场 q-pennant-scan   (全11k只扫对称收敛三角旗，慢牛途中才通过)
           ↓
 短线策略   q-seed-short     (三红买入V4: 3根箱体大阳→4根→缩量回调买入→起爆加仓)
           ↓
@@ -52,6 +54,7 @@
 | `q-dashboard` | Streamlit 单页4板块 :8501 | ✅ | — |
 | `q-backtest-fast` | walk-forward 多周期回测 | ✅ | — |
 | `q-pick-today` | 主流程编排 (q-seed+q-fin+push) | ✅ | ~$0.05/次 |
+| `q-hongjing-batch` | 宏景三角旗批处理 (必须 pennant.detected=True) cron 20:00 | ✅ | ~$0.01/次 |
 
 ---
 
@@ -60,6 +63,7 @@
 | 时间 | 脚本 | 内容 |
 |------|------|------|
 | 20:00 | q-pick-today-batch | 形态选股+q-fin+推送 |
+| 20:00 | q-hongjing-batch | 宏景三角旗扫描（需 pennant.detected=True 才推） |
 | 20:15 | q-news-daily-batch | 公告热点+推送 |
 | 21:00 | q-seed-short | 三红买入信号+推送 |
 | 20:30 | q-kechuang-batch | 科创突破+推送 Top3 |
@@ -139,9 +143,11 @@ boll_support 股票推送现含：
 
 | 用途 | Provider | 费用 |
 |------|---------|------|
-| 主 LLM | DeepSeek (openai_compat) | ~$0.14/1M tokens |
+| 实体调查 (entity_research) | DeepSeek V4-flash | 推理模型，穿透SPV到实控人，depth=3 |
+| 最终评判 (verdict) | DeepSeek V4-pro | 推理模型，⭐评级+重组方向+风险 |
+| 通用任务 / chatbot | DeepSeek V4-flash | ~$0.27/1M in，$1.10/1M out (估算) |
 | 搜索 | DuckDuckGo → Tavily fallback | DDG免费, Tavily 1000次/月免费 |
-| 意图路由 | DeepSeek | ~$0.0001/条 |
+| 意图路由 | DeepSeek V4-flash | ~$0.0001/条 |
 
 ---
 
@@ -191,3 +197,97 @@ boll_support 股票推送现含：
 ### q-fin 新增股东人数变化
 
 - 每季度股东人数增减 → LLM 提示：减少=筹码集中=利多；增加=散户涌入=需谨慎
+
+---
+
+## V1.9 新增 (2026-05-03)
+
+### 三红策略精修
+
+- **买入点时效窗口**：`RETRACE_WINDOW=15` 天，第4阳出现后15个交易日内才算有效买入点（修复原来推送几个月前过期信号的问题）
+- **起爆日判断修复**：从后往前找最近起爆日（原来找最早），`launch_days_ago ≤ 1` 才算三红起爆
+- **推送格式**：所有结果合并为一条消息，起爆组/买入点组分两段，含第3阳日期、起爆日期、止损价
+- **不再调用 q-fin**：三红结果是数据驱动的，不需要LLM判断
+
+### 宏景三角旗策略重写
+
+**五重检测条件**（新增 ③④⑤）：
+1. 几何收敛：高点线下倾 + 低点线上倾 + 通道内
+2. MA20 稳健上升（slope>0，单调比≥60%）
+3. 摆动点间距 ≥ 10 个交易日（过滤一两周内走完的微型波浪）
+4. 整体时长 ≥ 40 个交易日（2个月），最长 130 天（6个月）
+5. **慢牛位置约束**：第一摆动高点 ≥ 窗口最高价90%（从顶部出发），且起点比顶部低 ≥ 12%（之前有过上涨）
+
+**`q-hongjing-batch`**：新批处理脚本，必须 `pennant.detected=True` 才推送，每股单独一条消息。
+
+**全市场三角旗扫描**：11806只全扫（约120秒），五重条件过滤后约40只，分🔔挖坑买入/⚡即将突破两组，接 q-fin paid + 每股单独推送。
+
+### q-push 推送改进
+
+- **`--per-stock` 模式**：每条记录单独推一条消息（q-seed 宏景用）
+- **去掉 score 数字**：推送内容只展示 ⭐ 评星，不显示内部分数
+- 宏景推送新增推理链：相似度评级、近期涨跌、三角旗高低点序列、DeepSeek评判、股东人数变化、入场/止损/目标
+
+### 企微 chatbot 分析质量修复
+
+**原问题**：企微发"分析 001203"，DeepSeek 结论全是"卖出"，因为 context 里只有"基本面差+已大涨"。
+
+**修复**：
+- `analyst.py` 新增 `_scan_signals()`：扫描四种策略（三红V4/三角旗/科创突破/布林带），把触发信号原文传给 DeepSeek
+- 告知 DeepSeek "用户问这只股的原因是量化信号"
+- system role 改为"量化+技术面分析师"，明确技术信号可优先于基本面
+- temperature 0.6 → 0.1（减少幻觉）
+
+验证：001203 大中矿业"卖出"→"持有"（正确识别三红起爆信号）
+
+### DeepSeek V4 升级
+
+- API 确认 V4-flash / V4-pro 已上线（均为推理模型，有 `reasoning_content` 链式思考）
+- `llm_openai_compat.py`：识别推理模型，自动升 max_tokens→4000，从 reasoning_content 回退
+- 切换：`default_model=deepseek-v4-flash`，`verdict_model=deepseek-v4-pro`
+- 实体调查每层查询改用 V4-flash（原 V3）
+
+### q-fin 深度升级
+
+- **实体调查深度**：`max_depth_standard: 2 → 3`，`max_depth_deep: 3 → 4`
+- **PDF公告解析**：对控制权变更/借壳重组/主业转型公告自动下载 PDF 正文
+  - cninfo detail URL → 直接PDF：`static.cninfo.com.cn/finalpage/{date}/{id}.PDF`
+  - pdfminer.six 提取前5页，最多3000字，500字片段注入 LLM prompt
+  - 验证：长龄液压要约收购公告 → 正文提取"核芯破浪 35.82元/股 要约收购12%..."
+- **股东人数变化**：修复 `stock_holder_num_em` 不存在问题，改用 `stock_zh_a_gdhs_detail_em`
+
+---
+
+## ⚠️ 待完成 / 已知问题
+
+### 策略层
+
+- [ ] **三角旗回测**：目前没有对三角旗策略做历史回测，五重条件的有效性只有定性验证（宏景/亨通/光迅案例），需要 walk-forward 回测量化胜率
+- [ ] **三红策略回测**：V4 版本（含买入窗口15天约束）的回测数据需要重跑（现有回测是旧版本）
+- [ ] **宏景 KNN + 三角旗联合信号**：目前两个条件分开运行，应该联合：KNN 距离 <6 AND pennant.detected=True 才是最强信号
+- [ ] **q-hongjing-batch cron 未设置**：新脚本已写但 crontab 里没有加进去
+
+### 数据层
+
+- [ ] **q-sync 修复**：TDX zip 下载地址失效（2026-05-02 测试下载了0字节），需要找新的数据源或修复下载逻辑
+- [ ] **baostock 数据**：现在主要依赖 TDX 本地数据，baostock 增量更新脚本的可靠性未充分测试
+
+### q-fin / LLM
+
+- [ ] **DeepSeek V4 定价**：官方未公布正式价格，config 里的 pricing 是 R1 价格估算，账单可能有出入
+- [ ] **PDF 解析范围**：目前只对 `控制权变更/借壳重组/主业转型` 类公告下载 PDF；季报/年报等重要财务文件没有解析
+- [ ] **搜索质量**：DDG 对中文公司信息索引有限，Yandex 连不上，Brave 不稳定；考虑切换到 Tavily 作为主搜索
+- [ ] **entity_research 缓存**：hints 缓存命中时 `reasoning_steps[].model` 显示为空，不影响功能但日志不清晰
+- [ ] **q-fin 实体调查 depth=3 成本未测**：新配置下每只股票的实际 LLM 费用未测量
+
+### chatbot / 推送
+
+- [ ] **cloudflare tunnel URL 每次重启变更**：trycloudflare.com 免费 tunnel 每次 URL 不同，需要手动更新企微后台，考虑付费 named tunnel 一劳永逸
+- [ ] **chatbot 未识别 "三角旗" 意图**：企微发"有三角旗信号吗"目前会走 chat 自由问答，没有触发全市场三角旗扫描
+- [ ] **q-push 消息超4096字节**：三红买入点超过15只时消息会截断，目前按字节预算控制，但截断规则不够优雅
+
+### 架构 / 技术债（pilot 阶段暂不处理）
+
+- [ ] **凭据硬编码**：.env 文件不在 git，但路径写死在代码里
+- [ ] **q-pick-today vs q-hongjing-batch 重复**：两条宏景流程并行，old (q-backtest-fast) 和 new (q-seed+pennant) 没有合并
+- [ ] **无持久化仓位跟踪**：买入信号推送后没有记录，止损/卖出提醒需要手动执行
