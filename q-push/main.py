@@ -322,8 +322,8 @@ def _fmt_three_red_v4(r: dict) -> list[str]:
     return lines
 
 
-def format_three_red_batch(hits: list[dict], scan_date: str = "") -> str:
-    """将三红策略所有命中整理成一条汇总消息."""
+def format_three_red_batch(hits: list[dict], scan_date: str = "", max_bytes: int = 4000) -> str:
+    """将三红策略所有命中整理成一条汇总消息，控制在 max_bytes 字节内."""
     if not scan_date:
         scan_date = time.strftime("%Y-%m-%d")
     score5 = [h for h in hits if h.get("score") == 5]
@@ -332,38 +332,48 @@ def format_three_red_batch(hits: list[dict], scan_date: str = "") -> str:
     lines = [f"## ⚡ 三红买入策略 · {scan_date}", ""]
 
     if score5:
-        lines.append(f"**🚀 三红起爆（今日/昨日起爆，可追加仓）** {len(score5)} 只")
+        lines.append(f"**🚀 三红起爆（今日/昨日起爆）** {len(score5)} 只")
         for h in score5:
             ld = h.get("launch_date", "?")
             days_ago = h.get("launch_days_ago", "?")
-            ago = "今日" if days_ago == 0 else ("昨日" if days_ago == 1 else f"{days_ago}日前")
+            ago = "今日" if days_ago == 0 else "昨日"
             lret = h.get("launch_ret", "?")
             c3 = h.get("c3_date", "?")
             stop = h.get("stop_price", "?")
-            lines.append(f"- **{h.get('name','')} ({h.get('code','')})** "
-                         f"第3阳:{c3} | 起爆:{ld}({ago})+{lret}% | 止损:{stop}")
+            lines.append(f"- **{h.get('name','')}({h.get('code','')})** "
+                         f"第3阳:{c3} 起爆:{ld}({ago})+{lret}% 止损:{stop}")
         lines.append("")
 
     if score4:
-        lines.append(f"**🔔 三红买入点（今日在回调区+缩量，可轻仓建底）** {len(score4)} 只")
-        for h in score4[:15]:
+        lines.append(f"**🔔 三红买入点（今日回调区+缩量）** {len(score4)} 只")
+        footer = ["", "操作：买入点轻仓建底止损第3阳LOW，起爆后加仓移止损至起爆中值持3天卖",
+                  "⚠️ 仅供研究参考"]
+        footer_bytes = len("\n".join(footer).encode("utf-8"))
+        used = len("\n".join(lines).encode("utf-8"))
+        budget = max_bytes - footer_bytes - used - 50
+
+        for h in score4:
             c3 = h.get("c3_date", "?")
             fd = h.get("fourth_date", "?")
             c3m = h.get("c3_mid")
             stop = h.get("stop_price", "?")
             vs = h.get("cur_vs_mid")
             vr = h.get("vol_ratio")
-            mid_str = f"中值:{c3m:.2f} " if c3m else ""
-            vs_str = f"偏离:{vs:+.1f}% " if vs is not None else ""
-            vr_str = f"量比:{vr:.2f}x" if vr is not None else ""
-            lines.append(f"- **{h.get('name','')} ({h.get('code','')})** "
-                         f"第3阳:{c3} | 第4阳:{fd} | {mid_str}{vs_str}{vr_str} | 止损:{stop}")
-        if len(score4) > 15:
-            lines.append(f"  ...（共{len(score4)}只，仅列前15）")
+            mid_str = f"中:{c3m:.2f} " if c3m else ""
+            vs_str = f"{vs:+.0f}% " if vs is not None else ""
+            vr_str = f"量:{vr:.1f}x" if vr is not None else ""
+            row = (f"- **{h.get('name','')}({h.get('code','')})** "
+                   f"第3阳:{c3} 第4:{fd} {mid_str}{vs_str}{vr_str} 止:{stop}")
+            row_bytes = len(row.encode("utf-8"))
+            if budget - row_bytes < 0:
+                lines.append(f"  ...（仅列部分，共{len(score4)}只）")
+                break
+            lines.append(row)
+            budget -= row_bytes + 1  # +1 for newline
         lines.append("")
 
-    lines.append("- 操作：三红买入轻仓建底，止损第3阳LOW；起爆日出现后加仓，止损移至起爆日中值，持3天卖出")
-    lines.append("⚠️ 仅供研究参考，不构成投资建议")
+    lines.append("操作：买入点轻仓建底止损第3阳LOW，起爆后加仓移止损至起爆中值持3天卖")
+    lines.append("⚠️ 仅供研究参考")
     return "\n".join(lines)
 
 
