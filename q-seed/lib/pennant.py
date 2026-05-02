@@ -27,6 +27,10 @@ MAX_WIN = 130          # 最长6个月
 MIN_SWING_SPACING = 10  # 相邻摆动点间距至少10个交易日（约2周）
 MIN_WAVE_AMP = 0.05     # 每轮波幅（高点到低点）至少5%
 
+# 趋势位置约束（慢牛上涨途中形成三角旗）
+PENNANT_TOP_RATIO  = 0.90   # 第一摆动高点 ≥ 窗口最高价的90%（从顶部出发）
+PENNANT_PRIOR_RISE = 0.12   # 窗口起点比第一摆动高点低至少12%（之前有过上涨）
+
 # MA20 要求
 MA20_MIN_SLOPE = 0.0      # 斜率必须 > 0（上升）
 MA20_MIN_MONO = 0.60      # 单调上升比 ≥ 60%
@@ -89,6 +93,16 @@ def _check_window(H, L, C, dates_arr, n) -> dict | None:
     first_low  = float(L[sl[0]])
     wave_amp = abs(first_high - first_low) / avg_price
     if wave_amp < MIN_WAVE_AMP:
+        return None
+
+    # 趋势位置检验：三角旗必须从近期高点附近开始（非大幅回调途中）
+    # 条件1: 第一摆动高点 ≥ 窗口最高价的90%（三角旗从近期顶部出发）
+    period_high = float(np.max(H))
+    if first_high < period_high * PENNANT_TOP_RATIO:
+        return None
+    # 条件2: 窗口起点价格比第一摆动高点低至少12%（三角旗前有过一段上涨进入顶部）
+    start_price = float(C[0])
+    if start_price > first_high * (1 - PENNANT_PRIOR_RISE):
         return None
 
     coef_h = np.polyfit(sh, H[sh], 1)
