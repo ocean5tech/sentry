@@ -9,6 +9,10 @@
 
 import numpy as np
 
+# 缩量下跌日判断参数（挖坑买入点）
+DIP_VOL_RATIO = 0.80   # 量比 < 此值视为缩量
+DIP_LOOKBACK  = 3      # 检测最近N根K线是否有缩量下跌
+
 SWING_WIN = 2
 MIN_SWINGS = 2
 APEX_MAX_FUTURE = 25
@@ -162,3 +166,27 @@ def detect_pennant(df) -> dict:
             return res
 
     return {"detected": False}
+
+
+def is_dip_day(df) -> bool:
+    """
+    检测最近 DIP_LOOKBACK 根 K 线内是否有缩量下跌日（三角旗后的挖坑买入点）.
+
+    条件：
+      - 当日收盘 < 前日收盘 (下跌)
+      - 当日成交量 < 近 20 日均量 × DIP_VOL_RATIO (缩量)
+    """
+    if df is None or len(df) < 25:
+        return False
+    C = df["close"].values.astype(float)
+    V = df["volume"].values.astype(float)
+    n = len(df)
+    vol_ma20 = float(np.mean(V[max(0, n - 21): n - 1]))
+    if vol_ma20 <= 0:
+        return False
+    for i in range(n - DIP_LOOKBACK, n):
+        if i < 1:
+            continue
+        if C[i] < C[i - 1] and V[i] / vol_ma20 < DIP_VOL_RATIO:
+            return True
+    return False

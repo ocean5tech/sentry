@@ -155,7 +155,7 @@ def _fmt_pennant(r: dict) -> list[str]:
 
 
 def _fmt_three_red_bars(r: dict) -> list[str]:
-    """渲染三根红棍信号块."""
+    """渲染三根红棍信号块（旧版兼容）."""
     sig = r.get("signal_label", "")
     if sig not in ("三根红棍", "第四根大阳"):
         return []
@@ -172,6 +172,52 @@ def _fmt_three_red_bars(r: dict) -> list[str]:
         lines.append("- ⭐ 第四根大阳出现，强势买入信号")
     else:
         lines.append("- 观察中，等待第四根大阳确认")
+    return lines
+
+
+def _fmt_three_red_v4(r: dict) -> list[str]:
+    """渲染三红买入 V4 信号块."""
+    sig = r.get("signal_label", "")
+    if sig not in ("三红观察", "三红买入", "三红起爆"):
+        return []
+
+    c3_mid    = r.get("c3_mid")
+    stop_px   = r.get("stop_price")
+    fourth_h  = r.get("fourth_high")
+    vol_ratio = r.get("vol_ratio")
+    cur_vs_mid = r.get("cur_vs_mid")
+    launch_ret = r.get("launch_ret")
+
+    emoji = {"三红观察": "👁", "三红买入": "🔔", "三红起爆": "⚡"}[sig]
+    lines = [f"【{emoji} {sig}】"]
+
+    for key, label in [("c1_date","第1根"), ("c2_date","第2根"), ("c3_date","第3根"), ("fourth_date","第4根")]:
+        if r.get(key):
+            lines.append(f"- {label}: {r[key]}")
+
+    if c3_mid:
+        lines.append(f"- 第3根中值(买入参考): {c3_mid:.2f}")
+    if stop_px:
+        diff = round((stop_px - c3_mid) / c3_mid * 100, 1) if c3_mid else None
+        lines.append(f"- 止损: {stop_px:.2f}" + (f"（{diff:+.1f}%）" if diff else ""))
+    if fourth_h:
+        lines.append(f"- 前高(第4根): {fourth_h:.2f}")
+    if vol_ratio is not None:
+        lines.append(f"- 今日量比: {vol_ratio:.2f}x")
+    if cur_vs_mid is not None:
+        lines.append(f"- 当前偏离中值: {cur_vs_mid:+.1f}%")
+    if launch_ret:
+        ld = r.get("launch_date", "")
+        lines.append(f"- 起爆日: {ld} 涨幅 {launch_ret}%")
+
+    if sig == "三红买入":
+        lines.append("- ✅ 今日已回调至中值区+缩量，可建仓（止损第3根LOW）")
+        lines.append("- 等待起爆日(≥8%大阳)出现后追加仓位，移止损至起爆中值")
+    elif sig == "三红起爆":
+        lines.append("- ⚡ 起爆日已出现！跟进加仓，止损移至起爆日中值，持3天卖出")
+    else:
+        lines.append("- 等待价格回调至中值区且缩量时买入")
+
     return lines
 
 
@@ -231,9 +277,18 @@ def format_markdown(records: list[dict], tag: str, cfg: dict, include_link: bool
         # 三角旗收敛 (q-seed)
         for dl in _fmt_pennant(r):
             lines.append(f"> {dl}")
+        # 三角旗缩量挖坑买入点
+        p = r.get("pennant") or {}
+        if p.get("detected") and p.get("dip_today"):
+            lines.append("> 【🔔 三角旗挖坑买入点】今日缩量下跌 = 候选入场时机")
+            lines.append(">   等待后续≥10%放量大涨确认起爆，出现前轻仓观察")
 
-        # 三根红棍信号
+        # 三根红棍信号 (旧版)
         for dl in _fmt_three_red_bars(r):
+            lines.append(f"> {dl}")
+
+        # 三红买入 V4
+        for dl in _fmt_three_red_v4(r):
             lines.append(f"> {dl}")
 
         # 重组/注资分析（有则展示）

@@ -452,11 +452,15 @@ def main():
             df = None
 
         try:
-            from pennant import detect_pennant
+            from pennant import detect_pennant, is_dip_day
             pennant = detect_pennant(df)
+            if pennant.get("detected"):
+                pennant["dip_today"] = is_dip_day(df)
+            else:
+                pennant["dip_today"] = False
         except Exception as e:
             warn(f"pennant detection failed for {code}: {e}")
-            pennant = {"detected": False}
+            pennant = {"detected": False, "dip_today": False}
 
         rec = {
             "code": code,

@@ -100,6 +100,9 @@ def _dispatch(intent: str, args: dict, user: str):
         elif intent == "kechuang":
             _do_cached_batch("kechuang", "q-kechuang-batch",
                              "正在扫描科创/创业板平台突破，约需5分钟...", user)
+        elif intent == "short":
+            _do_cached_batch("short", "q-seed-short",
+                             "正在扫描三红买入信号（缩量回调+起爆日），约需3分钟...", user)
         elif intent == "help":
             wx.send(user, _HELP_TEXT)
         else:
