@@ -25,8 +25,15 @@ data:
 # 命令路径
 commands:
   q_backtest_fast: "/home/wyatt/sentry/quant/q-backtest/q-backtest-fast"
+  q_seed: "/home/wyatt/sentry/quant/q-seed/q-seed"
   q_fin: "/home/wyatt/sentry/quant/q-fin/q-fin"
   q_push: "/home/wyatt/sentry/quant/q-push/q-push"
+
+# 宏景三角旗扫描 (q-seed hongjing + pennant.detected)
+hongjing_pennant:
+  enabled: true
+  top_n: 30          # q-seed 初筛数量
+  always_run_fin: true   # 不看 ⭐ 门槛，全部跑 q-fin
 
 # q-fin 深度调研策略
 q_fin:

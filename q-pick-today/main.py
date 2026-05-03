@@ -71,6 +71,38 @@ def run_qbacktest(cmd: str, target_date: str, templates: list) -> list[dict]:
     return [json.loads(l) for l in files[0].read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
+def run_qseed_hongjing(qseed_cmd: str, top_n: int) -> list[dict]:
+    """运行 q-seed hongjing，返回 pennant.detected==True 的候选，字段归一化为 backtest 兼容格式."""
+    log(f"q-seed --template hongjing --top {top_n} (三角旗扫描)...")
+    proc = subprocess.run(
+        [qseed_cmd, "--template", "hongjing", "--top", str(top_n)],
+        capture_output=True, text=True, timeout=600,
+    )
+    if proc.returncode != 0:
+        log(f"q-seed hongjing failed: {proc.stderr[-300:]}")
+        return []
+    records = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not (r.get("pennant") or {}).get("detected"):
+            continue
+        # 归一化为 build_msg 兼容格式
+        r["template"]       = r.get("best_template", "hongjing")
+        r["template_dist"]  = r.get("best_dist", 99.0)
+        r["sig_date"]       = r.get("scan_date", "")
+        r["explosion_type"] = "三角旗"
+        r["_source"]        = "hongjing_pennant"
+        records.append(r)
+    log(f"q-seed hongjing 三角旗通过: {len(records)} 只")
+    return records
+
+
 def run_qfin_research(qfin_cmd: str, code: str, max_depth: int, budget: float) -> dict | None:
     """调 q-fin --paid --max-depth N 对单股做深度调研, 返回输出 dict."""
     log(f"  q-fin --paid --max-depth {max_depth} for {code} (budget ${budget:.2f})")
@@ -153,13 +185,42 @@ def build_msg(rec: dict, tpl_info: dict, fin_data: dict | None,
     m.append(f"**{name} ({code})** — {attention}")
     m.append("")
 
-    # ── q-seed 部分 ──────────────────────────────
-    m.append("【形态匹配 (q-seed)】")
-    m.append(f"- 模板: **{tpl_name}** 匹配度 **{match_pct}%** (dist={dist:.2f})")
-    m.append(f"- 起爆日: {sig_date}  [{etype_mark}]")
+    # ── 形态来源部分 ──────────────────────────────
+    is_pennant_source = rec.get("_source") == "hongjing_pennant"
+    is_both = rec.get("_source") == "both"
+    if is_pennant_source:
+        m.append("【宏景三角旗 (q-seed 整理期)】")
+        m.append(f"- 模板: **{tpl_name}** 相似度 **{match_pct}%** (dist={dist:.2f})")
+        m.append(f"- 扫描日: {sig_date}")
+    else:
+        m.append("【形态匹配 (q-backtest)】")
+        m.append(f"- 模板: **{tpl_name}** 匹配度 **{match_pct}%** (dist={dist:.2f})")
+        m.append(f"- 起爆日: {sig_date}  [{etype_mark}]")
+        if is_both:
+            m.append("- ⚡ 同时检测到三角旗整理形态")
     m.append(f"- 历史胜率: 80天 **{win80*100:.0f}%**, 均收益 +{avg_ret*100:.0f}%")
     m.append(f"- T+1 入场参考: **{entry_price:.2f}** 元")
     m.append(f"- 止损: {stop:.2f} (-7%)  目标: {target:.2f} (+{avg_ret*100:.0f}%)  持仓: {hold}")
+
+    # ── 三角旗细节 (有 pennant 时展示) ──────────────
+    pennant = rec.get("pennant") or {}
+    if pennant.get("detected"):
+        p_start = pennant.get("pennant_start", "")
+        p_end   = pennant.get("pennant_end", "")
+        comp    = pennant.get("compression", 0)
+        apex    = pennant.get("days_to_apex", "?")
+        dip     = pennant.get("dip_today", False)
+        m.append("")
+        m.append("【三角旗形态】")
+        m.append(f"- 区间: {p_start} ~ {p_end}  压缩 {comp:.0%}  距尖端 {apex}天")
+        if dip:
+            m.append("- ⚡ 今日缩量回调 = 买入候选")
+        sh = pennant.get("swing_highs") or []
+        sl = pennant.get("swing_lows") or []
+        if sh:
+            m.append("- 高点↓: " + " → ".join(f"{x['date']}@{x['price']}" for x in sh[:3]))
+        if sl:
+            m.append("- 低点↑: " + " → ".join(f"{x['date']}@{x['price']}" for x in sl[:3]))
 
     # ── q-fin 部分 (如有) ──────────────────────────
     if fin_data:
@@ -326,11 +387,31 @@ def main():
 
     # ─── Step 3: 过滤 sig_date == target_date ───
     same_day = [r for r in records if r.get("sig_date") == target_date]
+    for r in same_day:
+        r["_source"] = "backtest"
     log(f"sig_date == {target_date} 的候选: {len(same_day)}")
+
+    # ─── Step 2.5: 宏景三角旗扫描 ───
+    hp_cfg = cfg.get("hongjing_pennant", {})
+    pennant_candidates: list[dict] = []
+    if hp_cfg.get("enabled", True):
+        qseed_cmd = cfg["commands"].get("q_seed", "")
+        if qseed_cmd:
+            pennant_candidates = run_qseed_hongjing(qseed_cmd, hp_cfg.get("top_n", 30))
+
+    # 合并：backtest 已有的 code 如果也在三角旗里，打 "both" 标记
+    backtest_codes = {r["code"] for r in same_day}
+    for p in pennant_candidates:
+        matched = next((r for r in same_day if r["code"] == p["code"]), None)
+        if matched:
+            matched["pennant"] = p.get("pennant")
+            matched["_source"] = "both"
+        else:
+            same_day.append(p)
+
     if not same_day:
-        log(f"⚠️ {target_date} 没新起爆点, 不推送")
-        # 但还是发一条空消息让用户知道
-        msg = f"# 📭 {target_date} 无新起爆\n\n所有 5 模板今日均无 sig_date == {target_date} 的新触发标的.\n\n"
+        log(f"⚠️ {target_date} 既无新起爆点也无三角旗信号, 不推送")
+        msg = f"# 📭 {target_date} 无信号\n\n所有模板今日均无新触发标的, 也无宏景三角旗.\n\n"
         msg += cfg["push"]["disclaimer"].strip()
         if not args.skip_push:
             push_message(cfg["commands"]["q_push"], "EMPTY", "EMPTY", msg, "今日空")
@@ -347,24 +428,33 @@ def main():
         "xiangnong": {"win80": 0.895, "avg_ret80": 0.606},
     }
     for r in same_day:
-        tpl = r["template"]
+        tpl = r.get("template", "hongjing")
         win80 = TPL_STATS.get(tpl, {}).get("win80", 0.4)
-        r["_stars"] = rate_stars(r["template_dist"], win80, cfg["star_thresholds"])
+        r["_stars"] = rate_stars(r.get("template_dist", 99.0), win80, cfg["star_thresholds"])
 
-    # 按 ⭐ + dist 排序
-    same_day.sort(key=lambda r: (-r["_stars"], r["template_dist"]))
-    log(f"⭐ 分布: {[(r['code'], r['_stars']) for r in same_day]}")
+    # 三角旗候选：先按是否当日起爆(backtest)排，再按 ⭐ + dist
+    same_day.sort(key=lambda r: (
+        0 if r.get("_source") in ("backtest", "both") else 1,
+        -r["_stars"], r.get("template_dist", 99.0)
+    ))
+    log(f"候选汇总: {len(same_day)} 只 — " +
+        f"backtest={sum(1 for r in same_day if r.get('_source')=='backtest')} "
+        f"both={sum(1 for r in same_day if r.get('_source')=='both')} "
+        f"pennant={sum(1 for r in same_day if r.get('_source')=='hongjing_pennant')}")
 
-    # ─── Step 5: 选 ⭐⭐⭐⭐+ 跑 q-fin ───
+    # ─── Step 5: 跑 q-fin ───
     qfin_cfg = cfg["q_fin"]
     threshold = qfin_cfg.get("threshold_stars", 4)
+    always_fin_pennant = hp_cfg.get("always_run_fin", True)
     daily_budget = args.budget or qfin_cfg.get("daily_total_budget", 1.00)
     spent_total = 0.0
     fin_results: dict[str, dict] = {}
 
     if not args.skip_fin and qfin_cfg.get("enabled"):
         for r in same_day:
-            if r["_stars"] < threshold: continue
+            is_pennant = r.get("_source") in ("hongjing_pennant", "both")
+            if not is_pennant and r["_stars"] < threshold:
+                continue
             if r["code"] in fin_results: continue   # dedupe (双模板命中同股)
             if spent_total >= daily_budget:
                 log(f"  ⚠️ 日总预算 ${daily_budget:.2f} 用完, 跳过剩余")
@@ -390,7 +480,7 @@ def main():
         if code in pushed: continue   # dedupe (双模板命中只推一次, 选最高 ⭐)
         # 选该 code 最高 ⭐ 的 record (双命中时)
         candidates_for_code = [x for x in same_day if x["code"] == code]
-        candidates_for_code.sort(key=lambda x: (-x["_stars"], x["template_dist"]))
+        candidates_for_code.sort(key=lambda x: (-x["_stars"], x.get("template_dist", 99.0)))
         best = candidates_for_code[0]
         tpl_info = TPL_STATS[best["template"]]
         cur = get_latest_close(code, cfg["data"]["local_tdx"])
